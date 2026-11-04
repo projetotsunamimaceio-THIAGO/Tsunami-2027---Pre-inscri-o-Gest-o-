@@ -1,0 +1,6 @@
+{
+  "name": "TSUNAMI PRÉ INSCRIÇÃO & GESTÃO DE FREQUÊNCIA",
+  "description": "Sistema oficial de pré-inscrição de atletas, check-in em célula obrigatória, gestão de frequência e sorteio de linhas para o Projeto Tsunami (Arena na Sede Maceió — Igreja Sara Nossa Terra).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

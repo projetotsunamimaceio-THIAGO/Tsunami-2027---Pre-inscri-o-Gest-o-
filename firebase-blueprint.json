@@ -1,0 +1,46 @@
+{
+  "entities": {
+    "Athlete": {
+      "title": "Athlete",
+      "description": "Registered athlete for Projeto Tsunami",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string", "maxLength": 100 },
+        "age": { "type": "number" },
+        "phone": { "type": "string", "maxLength": 30 },
+        "classType": { "type": "string" },
+        "rating": { "type": "number" },
+        "cellConfirmed": { "type": "boolean" },
+        "classConfirmed": { "type": "boolean" },
+        "registeredAt": { "type": "string" }
+      },
+      "required": ["id", "name", "phone", "classType"]
+    },
+    "ClassSession": {
+      "title": "ClassSession",
+      "description": "Training class session for Projeto Tsunami",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string", "maxLength": 100 },
+        "sport": { "type": "string" },
+        "maxSlots": { "type": "number" },
+        "startTime": { "type": "string" },
+        "endTime": { "type": "string" },
+        "location": { "type": "string" }
+      },
+      "required": ["id", "title", "maxSlots"]
+    }
+  },
+  "firestore": {
+    "/athletes/{athleteId}": {
+      "schema": "Athlete",
+      "description": "Athletes collection"
+    },
+    "/classes/{classId}": {
+      "schema": "ClassSession",
+      "description": "Classes collection"
+    }
+  }
+}
