@@ -603,26 +603,6 @@ export default function App() {
     }
   };
 
-  const clearMainPageLists = async () => {
-    if (confirm('Deseja limpar todas as listas da célula e das aulas na aba principal? (Os cadastros dos alunos serão mantidos).')) {
-      try {
-        for (const ath of athletes) {
-          await updateDoc(doc(db, 'athletes', ath.id), {
-            cellConfirmed: false,
-            classConfirmed: false,
-            selectedScheduledClasses: []
-          });
-        }
-        setAthletes(prev => prev.map(a => ({ ...a, cellConfirmed: false, classConfirmed: false, selectedScheduledClasses: [] })));
-        alert('Listas da aba principal limpas com sucesso!');
-      } catch (err) {
-        console.error('Error clearing main page lists:', err);
-        setAthletes(prev => prev.map(a => ({ ...a, cellConfirmed: false, classConfirmed: false, selectedScheduledClasses: [] })));
-        alert('Listas limpas com sucesso!');
-      }
-    }
-  };
-
   const shareWhatsApp = () => {
     const text = `🔥 *PROJETO TSUNAMI - ${activeClass?.title || 'Turma'}* 🔥\n📅 Horário: ${activeClass?.startTime} às ${activeClass?.endTime}\n📍 ${activeClass?.location}\n\nGaranta sua vaga e participe da nossa célula obrigatória às 20:00!`;
     window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
@@ -1996,15 +1976,6 @@ export default function App() {
               >
                 <Calendar className="w-4 h-4" />
                 <span>ESPORTE NO SÁBADO ({saturdaySportActive ? 'ATIVO' : 'INATIVO'})</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={clearMainPageLists}
-                className="px-5 py-3 rounded-xl text-xs font-bold font-mono bg-amber-950/60 hover:bg-amber-900 text-amber-300 border border-amber-800/60 transition-all flex items-center gap-2 cursor-pointer"
-              >
-                <RefreshCw className="w-4 h-4 text-amber-400" />
-                <span>LIMPAR LISTAS DA ABA PRINCIPAL</span>
               </button>
 
               <button
