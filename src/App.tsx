@@ -50,6 +50,7 @@ interface ClassSession {
 interface ScheduledClass {
   id: string;
   title: string;
+  type: 'aula' | 'celula';
   startTime: string;
   endTime: string;
   maxSlots: number;
@@ -135,23 +136,38 @@ export default function App() {
   const [isSorted, setIsSorted] = useState<boolean>(false);
   const [selectedClassId, setSelectedClassId] = useState<string>('class-1');
 
-  // Scheduled Classes (Aulas Programadas) State
+  // Scheduled Classes & Cell State
   const [scheduledClasses, setScheduledClasses] = useState<ScheduledClass[]>([]);
+  const [schedType, setSchedType] = useState<'aula' | 'celula'>('aula');
   const [schedTitle, setSchedTitle] = useState<string>('VOLEIBOL');
   const [schedStart, setSchedStart] = useState<string>('18:00');
   const [schedEnd, setSchedEnd] = useState<string>('20:30');
   const [schedVagas, setSchedVagas] = useState<number>(12);
 
+  const handleTypeChange = (t: 'aula' | 'celula') => {
+    setSchedType(t);
+    if (t === 'celula') {
+      setSchedTitle('CÉLULA OBRIGATÓRIA');
+      setSchedStart('20:00');
+      setSchedEnd('21:00');
+    } else {
+      setSchedTitle('VOLEIBOL');
+      setSchedStart('18:00');
+      setSchedEnd('20:30');
+    }
+  };
+
   const handleSaveScheduledClass = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!schedTitle.trim()) {
-      alert('Informe o nome da aula programada.');
+      alert('Informe o nome da sessão.');
       return;
     }
     const id = 'sched-' + Date.now();
     const newSched: ScheduledClass = {
       id,
       title: schedTitle.toUpperCase().trim(),
+      type: schedType,
       startTime: schedStart,
       endTime: schedEnd,
       maxSlots: Number(schedVagas),
@@ -160,10 +176,10 @@ export default function App() {
 
     try {
       await setDoc(doc(db, 'scheduled_classes', id), newSched);
-      alert('Aula programada com sucesso! Pré-inscrição aberta na aba principal.');
+      alert(`${schedType === 'celula' ? 'Célula' : 'Aula'} programada com sucesso! Pré-inscrição aberta na aba principal.`);
       setSchedTitle('');
     } catch (err) {
-      console.error('Error saving scheduled class:', err);
+      console.error('Error saving scheduled session:', err);
       setScheduledClasses(prev => [newSched, ...prev]);
       setSchedTitle('');
     }
@@ -567,6 +583,52 @@ export default function App() {
       await updateDoc(doc(db, 'athletes', id), { rating });
     } catch (err) {
       setAthletes(prev => prev.map(a => a.id === id ? { ...a, rating } : a));
+    }
+  };
+
+  const handleClearAllTestingData = async () => {
+    try {
+      const athletePromises = athletes.map(async (ath) => {
+        try {
+          await updateDoc(doc(db, 'athletes', ath.id), {
+            cellConfirmed: false,
+            classConfirmed: false,
+            selectedScheduledClasses: []
+          });
+        } catch (e) {
+          console.error('Error clearing athlete:', ath.id, e);
+        }
+      });
+      await Promise.all(athletePromises);
+
+      const schedPromises = scheduledClasses.map(async (sc) => {
+        try {
+          await deleteDoc(doc(db, 'scheduled_classes', sc.id));
+        } catch (e) {
+          console.error('Error deleting scheduled class:', sc.id, e);
+        }
+      });
+      await Promise.all(schedPromises);
+
+      setAthletes(prev => prev.map(a => ({
+        ...a,
+        cellConfirmed: false,
+        classConfirmed: false,
+        selectedScheduledClasses: []
+      })));
+      setScheduledClasses([]);
+
+      alert('🧹 Sucesso! Todas as inscrições de célula/aulas e as aulas programadas foram limpas.');
+    } catch (err) {
+      console.error('Error clearing test data:', err);
+      setAthletes(prev => prev.map(a => ({
+        ...a,
+        cellConfirmed: false,
+        classConfirmed: false,
+        selectedScheduledClasses: []
+      })));
+      setScheduledClasses([]);
+      alert('🧹 Inscrições limpas com sucesso!');
     }
   };
 
@@ -1354,27 +1416,55 @@ export default function App() {
               </div>
             </div>
 
-            {/* FORM: PROGRAMAR AULA */}
+            {/* FORM: PROGRAMAR SESSÃO (AULA OU CÉLULA) */}
             <div className="bg-[#050b14]/90 border border-emerald-500/30 rounded-2xl p-6 shadow-xl space-y-6">
-              <h3 className="text-xs font-mono font-bold tracking-widest text-emerald-300 uppercase pb-3 border-b border-slate-800">
-                PROGRAMAR NOVA AULA (ABRE PRÉ-INSCRIÇÃO NA ABA PRINCIPAL)
-              </h3>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+                <h3 className="text-xs font-mono font-bold tracking-widest text-emerald-300 uppercase">
+                  PROGRAMAR NOVA SESSÃO (AULA OU CÉLULA OBRIGATÓRIA)
+                </h3>
+                <div className="flex items-center gap-2 bg-slate-950 p-1 rounded-xl border border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => handleTypeChange('aula')}
+                    className={`px-4 py-2 rounded-lg text-xs font-bold font-mono transition-all ${
+                      schedType === 'aula'
+                        ? 'bg-emerald-500 text-slate-950 shadow-[0_0_15px_rgba(16,185,129,0.4)]'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    AULA PROGRAMADA
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleTypeChange('celula')}
+                    className={`px-4 py-2 rounded-lg text-xs font-bold font-mono transition-all ${
+                      schedType === 'celula'
+                        ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.4)]'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    CÉLULA OBRIGATÓRIA
+                  </button>
+                </div>
+              </div>
 
               <form onSubmit={handleSaveScheduledClass} className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                   <div className="md:col-span-2">
-                    <label className="block text-[10px] font-mono uppercase tracking-widest text-slate-400 mb-1.5">NOME DA AULA</label>
+                    <label className="block text-[10px] font-mono uppercase tracking-widest text-slate-400 mb-1.5">
+                      {schedType === 'celula' ? 'NOME DA CÉLULA' : 'NOME DA AULA'}
+                    </label>
                     <input
                       type="text"
                       required
-                      placeholder="Ex: VOLEIBOL"
+                      placeholder={schedType === 'celula' ? 'Ex: CÉLULA SEDE MACEIÓ' : 'Ex: VOLEIBOL'}
                       value={schedTitle}
                       onChange={(e) => setSchedTitle(e.target.value)}
                       className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-400 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none"
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] font-mono uppercase tracking-widest text-slate-400 mb-1.5">HORÁRIO INÍCIO</label>
+                    <label className="block text-[10px] font-mono uppercase tracking-widest text-slate-400 mb-1.5">INÍCIO</label>
                     <input
                       type="time"
                       required
@@ -1384,7 +1474,7 @@ export default function App() {
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] font-mono uppercase tracking-widest text-slate-400 mb-1.5">HORÁRIO TÉRMINO</label>
+                    <label className="block text-[10px] font-mono uppercase tracking-widest text-slate-400 mb-1.5">TÉRMINO</label>
                     <input
                       type="time"
                       required
@@ -1393,8 +1483,8 @@ export default function App() {
                       className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-400 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none"
                     />
                   </div>
-                  <div>
-                    <label className="block text-[10px] font-mono uppercase tracking-widest text-slate-400 mb-1.5">VAGAS</label>
+                  <div className="md:col-span-4">
+                    <label className="block text-[10px] font-mono uppercase tracking-widest text-slate-400 mb-1.5">VAGAS / CAPACIDADE</label>
                     <input
                       type="number"
                       min="1"
@@ -1409,10 +1499,14 @@ export default function App() {
                 <div className="flex justify-end pt-2">
                   <button
                     type="submit"
-                    className="px-6 py-2.5 bg-gradient-to-r from-emerald-400 to-teal-400 text-slate-950 font-bold rounded-xl text-xs shadow-[0_0_20px_rgba(16,185,129,0.4)] transition-all flex items-center gap-2"
+                    className={`px-6 py-2.5 font-bold rounded-xl text-xs shadow-lg transition-all flex items-center gap-2 ${
+                      schedType === 'celula'
+                        ? 'bg-gradient-to-r from-amber-400 to-orange-500 text-slate-950 shadow-amber-500/30'
+                        : 'bg-gradient-to-r from-emerald-400 to-teal-400 text-slate-950 shadow-emerald-500/30'
+                    }`}
                   >
                     <Plus className="w-4 h-4 stroke-[3]" />
-                    <span>PROGRAMAR AULA E ABRIR PRÉ-INSCRIÇÃO</span>
+                    <span>PROGRAMAR {schedType === 'celula' ? 'CÉLULA OBRIGATÓRIA' : 'AULA'} E ABRIR PRÉ-INSCRIÇÃO</span>
                   </button>
                 </div>
               </form>
@@ -1463,6 +1557,9 @@ export default function App() {
                       </div>
 
                       <div className="space-y-2 text-xs text-slate-300 font-mono">
+                        <p className="flex items-center gap-2">
+                          🏷️ Tipo: <strong className={c.type === 'celula' ? 'text-amber-400 uppercase' : 'text-emerald-400 uppercase'}>{c.type === 'celula' ? 'Célula Obrigatória' : 'Aula Programada'}</strong>
+                        </p>
                         <p className="flex items-center gap-2">🕒 Horário: <strong className="text-white">{c.startTime} às {c.endTime}</strong></p>
                         <p className="flex items-center gap-2">👥 Capacidade: <strong className="text-white">{c.maxSlots} vagas</strong></p>
                       </div>
@@ -1813,6 +1910,17 @@ export default function App() {
               <p className="text-xs text-slate-400 mt-1 uppercase tracking-widest font-medium">
                 Gerenciamento Geral • Acesso Exclusivo da Coordenação
               </p>
+            </div>
+
+            <div className="flex justify-center">
+              <button
+                type="button"
+                onClick={handleClearAllTestingData}
+                className="px-6 py-3 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/50 rounded-xl text-xs font-bold font-mono tracking-wider transition-all flex items-center gap-2 shadow-lg shadow-amber-500/20 cursor-pointer"
+              >
+                <RefreshCw className="w-4 h-4 text-amber-400" />
+                <span>🧹 LIMPAR TODAS AS INSCRIÇÕES E AULAS PARA TESTE</span>
+              </button>
             </div>
 
             {/* 6 Interactive Glowing Action Buttons Grid */}
