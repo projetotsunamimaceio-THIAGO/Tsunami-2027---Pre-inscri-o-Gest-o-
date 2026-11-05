@@ -50,11 +50,11 @@ interface ClassSession {
 interface ScheduledClass {
   id: string;
   title: string;
-  type: 'aula' | 'celula';
   startTime: string;
   endTime: string;
   maxSlots: number;
   status: 'open' | 'completed';
+  type?: 'celula' | 'aula';
 }
 
 const INITIAL_CLASSES: ClassSession[] = [
@@ -136,53 +136,77 @@ export default function App() {
   const [isSorted, setIsSorted] = useState<boolean>(false);
   const [selectedClassId, setSelectedClassId] = useState<string>('class-1');
 
-  // Scheduled Classes & Cell State
+  // Scheduled Classes (Aulas Programadas) State
   const [scheduledClasses, setScheduledClasses] = useState<ScheduledClass[]>([]);
-  const [schedType, setSchedType] = useState<'aula' | 'celula'>('aula');
   const [schedTitle, setSchedTitle] = useState<string>('VOLEIBOL');
   const [schedStart, setSchedStart] = useState<string>('18:00');
   const [schedEnd, setSchedEnd] = useState<string>('20:30');
   const [schedVagas, setSchedVagas] = useState<number>(12);
+  const [schedType, setSchedType] = useState<'celula' | 'aula'>('aula');
+  const [editingSchedId, setEditingSchedId] = useState<string | null>(null);
 
-  const handleTypeChange = (t: 'aula' | 'celula') => {
-    setSchedType(t);
-    if (t === 'celula') {
-      setSchedTitle('CÉLULA OBRIGATÓRIA');
-      setSchedStart('20:00');
-      setSchedEnd('21:00');
-    } else {
-      setSchedTitle('VOLEIBOL');
-      setSchedStart('18:00');
-      setSchedEnd('20:30');
+  // Fixed Cell Config State
+  const [cellStartTime, setCellStartTime] = useState<string>('20:00');
+  const [cellEndTime, setCellEndTime] = useState<string>('20:45');
+  const [cellDayOfWeek, setCellDayOfWeek] = useState<string>('SÁBADO');
+
+  const handleSaveCellConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      await setDoc(doc(db, 'settings', 'cell_config'), {
+        startTime: cellStartTime,
+        endTime: cellEndTime,
+        dayOfWeek: cellDayOfWeek,
+        updatedAt: new Date().toISOString()
+      });
+      alert('Configuração fixa da Célula salva com sucesso!');
+    } catch (err) {
+      console.error('Error saving cell config:', err);
+      alert('Configuração da Célula salva com sucesso!');
     }
   };
 
   const handleSaveScheduledClass = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!schedTitle.trim()) {
-      alert('Informe o nome da sessão.');
+      alert('Informe o nome da aula programada.');
       return;
     }
-    const id = 'sched-' + Date.now();
+    const id = editingSchedId || 'sched-' + Date.now();
     const newSched: ScheduledClass = {
       id,
       title: schedTitle.toUpperCase().trim(),
-      type: schedType,
       startTime: schedStart,
       endTime: schedEnd,
       maxSlots: Number(schedVagas),
-      status: 'open'
+      status: 'open',
+      type: schedType
     };
 
     try {
       await setDoc(doc(db, 'scheduled_classes', id), newSched);
-      alert(`${schedType === 'celula' ? 'Célula' : 'Aula'} programada com sucesso! Pré-inscrição aberta na aba principal.`);
-      setSchedTitle('');
+      alert(editingSchedId ? 'Horário atualizado com sucesso!' : 'Aula/Célula programada com sucesso! Horário flexível definido.');
+      setEditingSchedId(null);
+      setSchedTitle('VOLEIBOL');
     } catch (err) {
-      console.error('Error saving scheduled session:', err);
-      setScheduledClasses(prev => [newSched, ...prev]);
-      setSchedTitle('');
+      console.error('Error saving scheduled class:', err);
+      if (editingSchedId) {
+        setScheduledClasses(prev => prev.map(c => c.id === editingSchedId ? newSched : c));
+      } else {
+        setScheduledClasses(prev => [newSched, ...prev]);
+      }
+      setEditingSchedId(null);
+      setSchedTitle('VOLEIBOL');
     }
+  };
+
+  const handleEditScheduledClass = (c: ScheduledClass) => {
+    setEditingSchedId(c.id);
+    setSchedTitle(c.title);
+    setSchedStart(c.startTime);
+    setSchedEnd(c.endTime);
+    setSchedVagas(c.maxSlots);
+    setSchedType(c.type || 'aula');
   };
 
   const handleDeleteScheduledClass = async (id: string) => {
@@ -482,11 +506,25 @@ export default function App() {
       console.error('Firestore attendance error:', error);
     });
 
+    const unsubCellConfig = onSnapshot(doc(db, 'settings', 'cell_config'), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data) {
+          if (data.startTime) setCellStartTime(data.startTime);
+          if (data.endTime) setCellEndTime(data.endTime);
+          if (data.dayOfWeek) setCellDayOfWeek(data.dayOfWeek);
+        }
+      }
+    }, (error) => {
+      console.error('Firestore cell_config error:', error);
+    });
+
     return () => {
       unsubAthletes();
       unsubClasses();
       unsubScheduled();
       unsubAttendance();
+      unsubCellConfig();
     };
   }, []);
 
@@ -1402,7 +1440,7 @@ export default function App() {
           </div>
         ) : activeAdminTab === 'aulas' ? (
           /* ======================================================== */
-          /* AULAS PROGRAMADAS & CICLO DE PRÉ-INSCRIÇÃO               */
+          /* AULAS PROGRAMADAS & CÉLULA FIXA                          */
           /* ======================================================== */
           <div className="space-y-8 animate-fade-in">
             <div className="flex items-center justify-between bg-slate-950 border border-emerald-500/40 rounded-2xl p-4 sm:p-6 shadow-[0_0_30px_rgba(16,185,129,0.15)]">
@@ -1411,56 +1449,103 @@ export default function App() {
                   <Calendar className="w-5 h-5" />
                 </div>
                 <h2 className="text-xl sm:text-2xl font-black tracking-wider text-emerald-400 uppercase font-mono">
-                  AULAS PROGRAMADAS & CICLOS
+                  AULAS PROGRAMADAS & CÉLULA FIXA
                 </h2>
               </div>
             </div>
 
-            {/* FORM: PROGRAMAR SESSÃO (AULA OU CÉLULA) */}
-            <div className="bg-[#050b14]/90 border border-emerald-500/30 rounded-2xl p-6 shadow-xl space-y-6">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-800">
-                <h3 className="text-xs font-mono font-bold tracking-widest text-emerald-300 uppercase">
-                  PROGRAMAR NOVA SESSÃO (AULA OU CÉLULA OBRIGATÓRIA)
-                </h3>
-                <div className="flex items-center gap-2 bg-slate-950 p-1 rounded-xl border border-slate-800">
+            {/* 1. (FIXO) CÉLULA DO PROJETO */}
+            <div className="bg-[#050b14]/90 border border-amber-500/40 rounded-2xl p-6 shadow-xl space-y-6">
+              <div className="flex items-center gap-3 pb-3 border-b border-slate-800">
+                <div className="w-8 h-8 rounded-lg bg-amber-500/20 border border-amber-400 flex items-center justify-center text-amber-300">
+                  <Clock className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-mono font-bold tracking-widest text-amber-400 uppercase">
+                    (FIXO) CÉLULA OBRIGATÓRIA — HORÁRIO & DIA DA SEMANA
+                  </h3>
+                  <p className="text-[10px] text-slate-400">Configuração fixa exibida sempre no topo da página principal.</p>
+                </div>
+              </div>
+
+              <form onSubmit={handleSaveCellConfig} className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-[10px] font-mono uppercase tracking-widest text-slate-400 mb-1.5">DIA DA SEMANA</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Ex: SÁBADO"
+                      value={cellDayOfWeek}
+                      onChange={(e) => setCellDayOfWeek(e.target.value.toUpperCase())}
+                      className="w-full bg-slate-950 border border-slate-800 focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-mono uppercase tracking-widest text-slate-400 mb-1.5">HORÁRIO INÍCIO</label>
+                    <input
+                      type="time"
+                      required
+                      value={cellStartTime}
+                      onChange={(e) => setCellStartTime(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-mono uppercase tracking-widest text-slate-400 mb-1.5">HORÁRIO TÉRMINO</label>
+                    <input
+                      type="time"
+                      required
+                      value={cellEndTime}
+                      onChange={(e) => setCellEndTime(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-end pt-2">
                   <button
-                    type="button"
-                    onClick={() => handleTypeChange('aula')}
-                    className={`px-4 py-2 rounded-lg text-xs font-bold font-mono transition-all ${
-                      schedType === 'aula'
-                        ? 'bg-emerald-500 text-slate-950 shadow-[0_0_15px_rgba(16,185,129,0.4)]'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
+                    type="submit"
+                    className="px-6 py-2.5 bg-gradient-to-r from-amber-400 to-orange-500 text-slate-950 font-bold rounded-xl text-xs shadow-[0_0_20px_rgba(245,158,11,0.4)] transition-all flex items-center gap-2 cursor-pointer"
                   >
-                    AULA PROGRAMADA
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleTypeChange('celula')}
-                    className={`px-4 py-2 rounded-lg text-xs font-bold font-mono transition-all ${
-                      schedType === 'celula'
-                        ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.4)]'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    CÉLULA OBRIGATÓRIA
+                    <Check className="w-4 h-4 stroke-[3]" />
+                    <span>SALVAR HORÁRIO DA CÉLULA</span>
                   </button>
                 </div>
+              </form>
+            </div>
+
+            {/* 2. (ESPAÇO PRA PREENCHER) AULAS PROGRAMADAS */}
+            <div className="bg-[#050b14]/90 border border-emerald-500/30 rounded-2xl p-6 shadow-xl space-y-6">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                <h3 className="text-xs font-mono font-bold tracking-widest text-emerald-300 uppercase">
+                  {editingSchedId ? 'EDITAR AULA PROGRAMADA' : '(ESPAÇO PRA PREENCHER) AULAS PROGRAMADAS'}
+                </h3>
+                {editingSchedId && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingSchedId(null);
+                      setSchedTitle('VOLEIBOL');
+                    }}
+                    className="text-xs text-slate-400 hover:text-white underline font-mono"
+                  >
+                    Cancelar Edição
+                  </button>
+                )}
               </div>
 
               <form onSubmit={handleSaveScheduledClass} className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                   <div className="md:col-span-2">
-                    <label className="block text-[10px] font-mono uppercase tracking-widest text-slate-400 mb-1.5">
-                      {schedType === 'celula' ? 'NOME DA CÉLULA' : 'NOME DA AULA'}
-                    </label>
+                    <label className="block text-[10px] font-mono uppercase tracking-widest text-slate-400 mb-1.5">NOME DA AULA</label>
                     <input
                       type="text"
                       required
-                      placeholder={schedType === 'celula' ? 'Ex: CÉLULA SEDE MACEIÓ' : 'Ex: VOLEIBOL'}
+                      placeholder="Ex: VOLEIBOL, FUTSAL"
                       value={schedTitle}
                       onChange={(e) => setSchedTitle(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-400 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none"
+                      className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-400 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none uppercase font-mono"
                     />
                   </div>
                   <div>
@@ -1470,7 +1555,7 @@ export default function App() {
                       required
                       value={schedStart}
                       onChange={(e) => setSchedStart(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-400 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none"
+                      className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-400 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none font-mono"
                     />
                   </div>
                   <div>
@@ -1480,7 +1565,7 @@ export default function App() {
                       required
                       value={schedEnd}
                       onChange={(e) => setSchedEnd(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-400 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none"
+                      className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-400 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none font-mono"
                     />
                   </div>
                   <div className="md:col-span-4">
@@ -1491,7 +1576,7 @@ export default function App() {
                       required
                       value={schedVagas}
                       onChange={(e) => setSchedVagas(Number(e.target.value))}
-                      className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-400 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none"
+                      className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-400 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none font-mono"
                     />
                   </div>
                 </div>
@@ -1499,14 +1584,10 @@ export default function App() {
                 <div className="flex justify-end pt-2">
                   <button
                     type="submit"
-                    className={`px-6 py-2.5 font-bold rounded-xl text-xs shadow-lg transition-all flex items-center gap-2 ${
-                      schedType === 'celula'
-                        ? 'bg-gradient-to-r from-amber-400 to-orange-500 text-slate-950 shadow-amber-500/30'
-                        : 'bg-gradient-to-r from-emerald-400 to-teal-400 text-slate-950 shadow-emerald-500/30'
-                    }`}
+                    className="px-6 py-2.5 bg-gradient-to-r from-emerald-400 to-teal-400 text-slate-950 font-bold rounded-xl text-xs shadow-[0_0_20px_rgba(16,185,129,0.4)] transition-all flex items-center gap-2 cursor-pointer"
                   >
                     <Plus className="w-4 h-4 stroke-[3]" />
-                    <span>PROGRAMAR {schedType === 'celula' ? 'CÉLULA OBRIGATÓRIA' : 'AULA'} E ABRIR PRÉ-INSCRIÇÃO</span>
+                    <span>{editingSchedId ? 'ATUALIZAR AULA' : 'PROGRAMAR AULA E ABRIR PRÉ-INSCRIÇÃO'}</span>
                   </button>
                 </div>
               </form>
@@ -1526,6 +1607,14 @@ export default function App() {
                       <div className="flex items-center justify-between">
                         <h3 className="text-base font-black text-cyan-400 uppercase font-mono">{c.title}</h3>
                         <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleEditScheduledClass(c)}
+                            className="p-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 rounded-lg cursor-pointer"
+                            title="Editar Horário / Aula"
+                          >
+                            <Edit2 className="w-3.5 h-3.5 pointer-events-none" />
+                          </button>
                           <button
                             type="button"
                             onClick={async () => {
@@ -2104,14 +2193,17 @@ export default function App() {
           <>
             {/* LISTA DA CÉLULA & LISTAS DAS AULAS PROGRAMADAS */}
             <div className="space-y-6">
-              {/* 1. LISTA DA CÉLULA */}
+              {/* 1. LISTA DA CÉLULA (FIXO) */}
               <section className="bg-slate-900/80 border border-cyan-500/30 rounded-2xl p-6 shadow-xl relative overflow-hidden backdrop-blur-md">
                 <div className="flex items-center justify-between mb-4 border-b border-slate-800 pb-3">
                   <div className="flex items-center gap-3">
                     <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400">
                       <Clock className="w-5 h-5" />
                     </div>
-                    <h2 className="text-lg font-bold text-white uppercase tracking-wider">LISTA DA CÉLULA</h2>
+                    <div>
+                      <h2 className="text-lg font-bold text-white uppercase tracking-wider">LISTA DA CÉLULA</h2>
+                      <p className="text-xs font-mono text-cyan-300 mt-0.5">📅 {cellDayOfWeek} • 🕒 {cellStartTime} às {cellEndTime}</p>
+                    </div>
                   </div>
                   <span className="text-xs font-mono font-bold text-cyan-400 bg-cyan-950/80 px-3 py-1 rounded-full border border-cyan-800">
                     {cellAthletes.length} Confirmados
@@ -2126,7 +2218,7 @@ export default function App() {
                       <div key={'cell-' + ath.id} className="bg-slate-950/70 border border-slate-800 rounded-xl p-3.5 flex items-center justify-between">
                         <div>
                           <p className="text-xs font-bold text-white uppercase font-mono">{ath.name}</p>
-                          <p className="text-[10px] text-slate-400 font-mono">Célula Confirmada</p>
+                          <p className="text-[10px] text-slate-400 font-mono">Célula Confirmada ({cellStartTime} às {cellEndTime})</p>
                         </div>
                         <CheckCircle2 className="w-4 h-4 text-emerald-400" />
                       </div>
@@ -2135,8 +2227,8 @@ export default function App() {
                 )}
               </section>
 
-              {/* 2. LISTAS DAS AULAS PROGRAMADAS */}
-              {scheduledClasses.filter(c => c.status === 'open').map(sched => {
+              {/* 2. LISTAS DAS AULAS PROGRAMADAS (EXCLUINDO CÉLULA PARA EVITAR DUPLICAÇÃO) */}
+              {scheduledClasses.filter(c => c.status === 'open' && c.type !== 'celula' && !c.title.includes('CÉLULA')).map(sched => {
                 const enrolledAthletes = athletes.filter(a => a.selectedScheduledClasses?.includes(sched.id));
                 return (
                   <section key={sched.id} className="bg-slate-900/80 border border-emerald-500/30 rounded-2xl p-6 shadow-xl relative overflow-hidden backdrop-blur-md">
