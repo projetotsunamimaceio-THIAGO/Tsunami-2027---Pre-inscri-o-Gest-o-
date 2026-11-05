@@ -93,10 +93,61 @@ const INITIAL_CLASSES: ClassSession[] = [
   }
 ];
 
+const INITIAL_ATHLETES: Athlete[] = [
+  {
+    id: 'ath-1',
+    name: 'THIAGO EUCLYDES ROCHA',
+    age: 22,
+    phone: '(82) 99999-1111',
+    classType: 'TURMA A - FUTSAL',
+    rating: 5,
+    cellConfirmed: true,
+    classConfirmed: true,
+    registeredAt: '2026-10-25 19:00',
+    matriculaDate: '2026-10-01',
+    vencimentoDate: '2026-12-31',
+    password: '2026'
+  },
+  {
+    id: 'ath-2',
+    name: 'JOÃO SILVA SANTOS',
+    age: 20,
+    phone: '(82) 99999-2222',
+    classType: 'TURMA B - BASQUETE',
+    rating: 4,
+    cellConfirmed: true,
+    classConfirmed: true,
+    registeredAt: '2026-10-26 19:30',
+    matriculaDate: '2026-10-01',
+    vencimentoDate: '2026-12-31',
+    password: '2026'
+  },
+  {
+    id: 'ath-3',
+    name: 'MARIA OLIVEIRA',
+    age: 19,
+    phone: '(82) 99999-3333',
+    classType: 'TURMA C - VOLEIBOL',
+    rating: 4,
+    cellConfirmed: true,
+    classConfirmed: true,
+    registeredAt: '2026-10-27 20:00',
+    matriculaDate: '2026-10-01',
+    vencimentoDate: '2026-12-31',
+    password: '2026'
+  }
+];
+
 const WEEK_DAYS = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
 
 export default function App() {
-  const [athletes, setAthletes] = useState<Athlete[]>([]);
+  const [athletes, setAthletes] = useState<Athlete[]>(() => {
+    const saved = localStorage.getItem('tsunami_athletes');
+    if (saved) {
+      try { const parsed = JSON.parse(saved); if (parsed.length > 0) return parsed; } catch (e) { /* ignore */ }
+    }
+    return INITIAL_ATHLETES;
+  });
   const [classes, setClasses] = useState<ClassSession[]>(INITIAL_CLASSES);
   const [isAdmin, setIsAdmin] = useState<boolean>(() => {
     return localStorage.getItem('tsunami_is_admin') === 'true';
@@ -149,6 +200,117 @@ export default function App() {
   const [cellStartTime, setCellStartTime] = useState<string>('20:00');
   const [cellEndTime, setCellEndTime] = useState<string>('20:45');
   const [cellDayOfWeek, setCellDayOfWeek] = useState<string>('SÁBADO');
+
+  // Report & Justificativa Modals State
+  const [showFreqReportModal, setShowFreqReportModal] = useState<boolean>(false);
+  const [showJustificativaModal, setShowJustificativaModal] = useState<boolean>(false);
+  const [reportPeriod, setReportPeriod] = useState<'mensal' | 'trimestral' | 'semestral' | 'anual'>('mensal');
+
+  // Justificativa Sábado State & Helpers
+  const [justifStep, setJustifStep] = useState<number>(1);
+  const [justifAthleteId, setJustifAthleteId] = useState<string>('');
+  const [justifSatIndex, setJustifSatIndex] = useState<number>(0);
+  const [justifSearch, setJustifSearch] = useState<string>('');
+  const [justifReason, setJustifReason] = useState<string>('');
+  const [overrideLock, setOverrideLock] = useState<boolean>(false);
+
+  const now = new Date();
+  const day = now.getDay(); // 5 = Sex, 6 = Sáb
+  const currentHour = now.getHours();
+  const currentMinute = now.getMinutes();
+
+  let isWithinWindow = false;
+  if (day === 5 && currentHour >= 23) {
+    isWithinWindow = true;
+  } else if (day === 6 && (currentHour < 13 || (currentHour === 13 && currentMinute <= 30))) {
+    isWithinWindow = true;
+  }
+  const isJustificationLocked = !isWithinWindow && !overrideLock;
+
+  const isAthleteEligibleForJustification = (athleteId: string) => {
+    const todayStr = now.toISOString().split('T')[0];
+    let targetSatIndex = saturdays.findIndex(sat => sat.toISOString().split('T')[0] >= todayStr);
+    if (targetSatIndex === -1) targetSatIndex = saturdays.length - 1;
+    if (targetSatIndex < 0) return false;
+
+    let prevSatKey = '';
+    if (targetSatIndex > 0) {
+      prevSatKey = saturdays[targetSatIndex - 1].toISOString().split('T')[0];
+    } else {
+      const prevMonth = freqMonthIndex === 0 ? 11 : freqMonthIndex - 1;
+      const prevYear = freqMonthIndex === 0 ? freqYear - 1 : freqYear;
+      const prevSats = getSaturdays(prevYear, prevMonth);
+      if (prevSats.length > 0) {
+        prevSatKey = prevSats[prevSats.length - 1].toISOString().split('T')[0];
+      } else {
+        return false;
+      }
+    }
+
+    const prevStatus = attendance[`${athleteId}_${prevSatKey}`] || '';
+    return prevStatus === 'P' || prevStatus === 'A';
+  };
+
+  // Confirmation Modal State
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    action: () => void;
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    action: () => {}
+  });
+
+  const promptEditClass = (c: ClassSession) => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'CONFIRMAR ALTERAÇÃO DE TURMA',
+      message: `Deseja realmente fazer a alteração na turma ${c.title}?`,
+      action: () => handleEditClass(c)
+    });
+  };
+
+  const promptDeleteClass = (id: string, title: string) => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'CONFIRMAR EXCLUSÃO DE TURMA',
+      message: `Deseja realmente apagar a turma ${title}?`,
+      action: async () => {
+        try {
+          await deleteDoc(doc(db, 'classes', id));
+        } catch (err) {
+          setClasses(prev => prev.filter(cl => cl.id !== id));
+        }
+      }
+    });
+  };
+
+  const promptEditAthlete = (a: Athlete) => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'CONFIRMAR ALTERAÇÃO DE ALUNO',
+      message: `Deseja realmente fazer a alteração no cadastro do aluno ${a.name}?`,
+      action: () => handleEditAthlete(a)
+    });
+  };
+
+  const promptDeleteAthlete = (id: string, name: string) => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'CONFIRMAR EXCLUSÃO DE ALUNO',
+      message: `Deseja realmente apagar o aluno ${name}?`,
+      action: async () => {
+        try {
+          await deleteDoc(doc(db, 'athletes', id));
+        } catch (err) {
+          setAthletes(prev => prev.filter(ath => ath.id !== id));
+        }
+      }
+    });
+  };
 
   const handleSaveCellConfig = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -209,14 +371,28 @@ export default function App() {
     setSchedType(c.type || 'aula');
   };
 
-  const handleDeleteScheduledClass = async (id: string) => {
-    if (confirm('Deseja realmente apagar esta aula programada?')) {
-      try {
-        await deleteDoc(doc(db, 'scheduled_classes', id));
-      } catch (err) {
-        setScheduledClasses(prev => prev.filter(c => c.id !== id));
+  const promptEditScheduledClass = (c: ScheduledClass) => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'CONFIRMAR ALTERAÇÃO DE AULA',
+      message: `Deseja realmente fazer a alteração na aula programada ${c.title}?`,
+      action: () => handleEditScheduledClass(c)
+    });
+  };
+
+  const promptDeleteScheduledClass = (id: string, title: string) => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'CONFIRMAR EXCLUSÃO DE AULA',
+      message: `Deseja realmente apagar a aula programada ${title}?`,
+      action: async () => {
+        try {
+          await deleteDoc(doc(db, 'scheduled_classes', id));
+        } catch (err) {
+          setScheduledClasses(prev => prev.filter(c => c.id !== id));
+        }
       }
-    }
+    });
   };
 
   // Student Pre-Registration 4-Step Wizard State
@@ -466,9 +642,14 @@ export default function App() {
       snapshot.forEach((docSnap) => {
         items.push({ id: docSnap.id, ...docSnap.data() } as Athlete);
       });
-      setAthletes(items);
+      if (items.length > 0) {
+        setAthletes(items);
+        localStorage.setItem('tsunami_athletes', JSON.stringify(items));
+      } else if (athletes.length === 0) {
+        INITIAL_ATHLETES.forEach(a => setDoc(doc(db, 'athletes', a.id), a).catch(() => {}));
+      }
     }, (error) => {
-      console.error('Firestore athletes error:', error);
+      console.warn('Firestore athletes offline/timeout, using local cache:', error);
     });
 
     const unsubClasses = onSnapshot(collection(db, 'classes'), (snapshot) => {
@@ -1081,7 +1262,7 @@ export default function App() {
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleEditClass(c);
+                            promptEditClass(c);
                           }}
                           className="p-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-xl transition-all cursor-pointer"
                           title="Editar Turma"
@@ -1092,7 +1273,7 @@ export default function App() {
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleDeleteClass(c.id);
+                            promptDeleteClass(c.id, c.title);
                           }}
                           className="p-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded-xl transition-all cursor-pointer"
                           title="Remover Turma"
@@ -1411,7 +1592,7 @@ export default function App() {
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                handleEditAthlete(a);
+                                promptEditAthlete(a);
                               }}
                               className="p-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-xl transition-all cursor-pointer"
                               title="Editar Aluno"
@@ -1422,7 +1603,7 @@ export default function App() {
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                handleDeleteAthlete(a.id);
+                                promptDeleteAthlete(a.id, a.name);
                               }}
                               className="p-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded-xl transition-all cursor-pointer"
                               title="Remover Aluno"
@@ -1609,7 +1790,7 @@ export default function App() {
                         <div className="flex items-center gap-2">
                           <button
                             type="button"
-                            onClick={() => handleEditScheduledClass(c)}
+                            onClick={() => promptEditScheduledClass(c)}
                             className="p-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 rounded-lg cursor-pointer"
                             title="Editar Horário / Aula"
                           >
@@ -1636,7 +1817,7 @@ export default function App() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => handleDeleteScheduledClass(c.id)}
+                            onClick={() => promptDeleteScheduledClass(c.id, c.title)}
                             className="p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg cursor-pointer"
                             title="Apagar Aula"
                           >
@@ -2263,6 +2444,46 @@ export default function App() {
                 );
               })}
             </div>
+
+            {/* TWO STYLIZED BANNER BUTTONS */}
+            <div className="flex flex-col items-center gap-4 pt-8 max-w-md mx-auto">
+              {/* RELATÓRIO FREQUÊNCIA BUTTON */}
+              <button
+                type="button"
+                onClick={() => setShowFreqReportModal(true)}
+                className="w-full relative group transform transition-all duration-300 hover:scale-105 cursor-pointer"
+              >
+                <div className="absolute -inset-1 bg-gradient-to-r from-blue-600 to-cyan-500 rounded-xl blur opacity-70 group-hover:opacity-100 transition duration-300" />
+                <div className="relative px-6 py-4 bg-gradient-to-r from-blue-950 via-blue-900 to-slate-950 border-2 border-blue-500/70 rounded-xl flex items-center justify-between shadow-[0_0_25px_rgba(30,58,138,0.6)]">
+                  <div className="flex items-center gap-3">
+                    <BarChart3 className="w-6 h-6 text-cyan-400" />
+                    <span className="text-base sm:text-lg font-black tracking-widest text-white uppercase font-mono">
+                      RELATÓRIO FREQUÊNCIA
+                    </span>
+                  </div>
+                  <span className="px-2.5 py-1 bg-blue-500/20 border border-blue-400/40 text-blue-300 text-[10px] font-mono font-bold rounded-lg">
+                    📊 ANÁLISE
+                  </span>
+                </div>
+              </button>
+
+              {/* JUSTIFICATIVA SÁBADO BUTTON */}
+              <button
+                type="button"
+                onClick={() => setShowJustificativaModal(true)}
+                className="w-full relative group transform transition-all duration-300 hover:scale-105 cursor-pointer"
+              >
+                <div className="absolute -inset-1 bg-gradient-to-r from-red-600 to-orange-500 rounded-xl blur opacity-70 group-hover:opacity-100 transition duration-300" />
+                <div className="relative px-6 py-4 bg-gradient-to-r from-red-950 via-red-900 to-slate-950 border-2 border-red-500/70 rounded-xl flex items-center justify-center shadow-[0_0_25px_rgba(153,27,27,0.6)]">
+                  <div className="flex items-center gap-3">
+                    <Calendar className="w-6 h-6 text-red-400" />
+                    <span className="text-base sm:text-lg font-black tracking-widest text-white uppercase font-mono">
+                      JUSTIFICATIVA SÁBADO
+                    </span>
+                  </div>
+                </div>
+              </button>
+            </div>
           </>
         )}
 
@@ -2602,6 +2823,405 @@ export default function App() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: RELATÓRIO DE FREQUÊNCIA & ANÁLISE ANALÍTICA */}
+      {showFreqReportModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fade-in overflow-y-auto">
+          <div className="bg-[#050b14] border-2 border-cyan-500/60 rounded-3xl max-w-4xl w-full p-6 sm:p-8 shadow-[0_0_50px_rgba(6,182,212,0.3)] relative my-8 space-y-6">
+            <button
+              onClick={() => setShowFreqReportModal(false)}
+              className="absolute top-6 right-6 text-slate-400 hover:text-white p-2 rounded-xl bg-slate-900 border border-slate-800 cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            {/* Header */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-cyan-500/20 border border-cyan-400 flex items-center justify-center text-cyan-300 shadow-[0_0_20px_rgba(6,182,212,0.4)]">
+                  <BarChart3 className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-black text-white uppercase tracking-wider font-mono">RELATÓRIO DE FREQUÊNCIA</h3>
+                  <p className="text-xs text-cyan-300 font-mono">Banco de dados com histórico de frequência e análises gráficas</p>
+                </div>
+              </div>
+
+              {/* Period Selector */}
+              <div className="flex items-center gap-1.5 bg-slate-950 p-1.5 rounded-xl border border-slate-800">
+                {(['mensal', 'trimestral', 'semestral', 'anual'] as const).map(p => (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setReportPeriod(p)}
+                    className={`px-3 py-1.5 rounded-lg text-[10px] font-mono font-bold uppercase transition-all ${
+                      reportPeriod === p
+                        ? 'bg-cyan-500 text-slate-950 shadow-[0_0_10px_rgba(6,182,212,0.5)]'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* 3 Analytics Charts Grid */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              
+              {/* Chart 1: Alunos por Turma (Pizza / Donut) */}
+              <div className="bg-slate-950/90 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-mono font-bold text-cyan-400 uppercase tracking-widest">
+                    1. Alunos por Turma (Quantidade)
+                  </h4>
+                  <span className="text-[10px] font-mono bg-cyan-950 text-cyan-300 px-2 py-0.5 rounded border border-cyan-800">PIZZA</span>
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-center justify-center gap-6 py-4">
+                  {/* Visual Donut representation */}
+                  <div className="relative w-36 h-36 rounded-full border-8 border-cyan-500/30 flex items-center justify-center shadow-[0_0_20px_rgba(6,182,212,0.2)]">
+                    <div className="absolute inset-0 rounded-full border-8 border-cyan-400 border-t-transparent animate-spin duration-1000" />
+                    <div className="text-center">
+                      <span className="text-2xl font-black text-white font-mono">{athletes.length}</span>
+                      <p className="text-[9px] font-mono text-slate-400 uppercase">Total Alunos</p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 text-xs font-mono">
+                    {Array.from(new Set(athletes.map(a => a.classType || 'TURMA A'))).map((turma, idx) => {
+                      const count = athletes.filter(a => (a.classType || 'TURMA A') === turma).length;
+                      const colors = ['text-cyan-400', 'text-emerald-400', 'text-amber-400', 'text-pink-400', 'text-purple-400'];
+                      const dots = ['bg-cyan-400', 'bg-emerald-400', 'bg-amber-400', 'bg-pink-400', 'bg-purple-400'];
+                      return (
+                        <div key={turma} className="flex items-center justify-between gap-6">
+                          <div className="flex items-center gap-2">
+                            <div className={`w-3 h-3 rounded-full ${dots[idx % dots.length]}`} />
+                            <span className="text-slate-300 uppercase">{turma}</span>
+                          </div>
+                          <span className={`font-black ${colors[idx % colors.length]}`}>{count} alunos</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* Chart 2: Desempenho das Turmas (Presença e Falta) (Colunas) */}
+              <div className="bg-slate-950/90 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-mono font-bold text-emerald-400 uppercase tracking-widest">
+                    2. Desempenho (Presenças vs Faltas)
+                  </h4>
+                  <span className="text-[10px] font-mono bg-emerald-950 text-emerald-300 px-2 py-0.5 rounded border border-emerald-800">COLUNAS</span>
+                </div>
+
+                <div className="space-y-3 pt-2">
+                  {Array.from(new Set(athletes.map(a => a.classType || 'TURMA A'))).map((turma, idx) => {
+                    const turmaAthletes = athletes.filter(a => (a.classType || 'TURMA A') === turma);
+                    let presCount = 0;
+                    let faltaCount = 0;
+                    turmaAthletes.forEach(a => {
+                      Object.entries(attendance).forEach(([k, v]) => {
+                        if (k.startsWith(a.id + '_')) {
+                          if (v === 'P' || v === 'A') presCount++;
+                          if (v === 'F' || v === 'J') faltaCount++;
+                        }
+                      });
+                    });
+                    const total = Math.max(1, presCount + faltaCount);
+                    const presPct = Math.round((presCount / total) * 100);
+
+                    return (
+                      <div key={turma} className="space-y-1">
+                        <div className="flex justify-between text-xs font-mono">
+                          <span className="text-white font-bold">{turma}</span>
+                          <span className="text-emerald-400">{presCount} Presenças / {faltaCount} Faltas</span>
+                        </div>
+                        <div className="w-full h-3 bg-slate-900 rounded-full overflow-hidden flex border border-slate-800">
+                          <div className="bg-emerald-500 h-full transition-all" style={{ width: `${presPct}%` }} />
+                          <div className="bg-red-500 h-full transition-all" style={{ width: `${100 - presPct}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+            </div>
+
+            {/* Chart 3: Desempenho das Turmas (Presenças) (Linhas) */}
+            <div className="bg-slate-950/90 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-mono font-bold text-amber-400 uppercase tracking-widest">
+                  3. Evolução de Presenças ({reportPeriod.toUpperCase()})
+                </h4>
+                <span className="text-[10px] font-mono bg-amber-950 text-amber-300 px-2 py-0.5 rounded border border-amber-800">LINHAS</span>
+              </div>
+
+              <div className="h-36 flex items-end justify-between gap-4 px-4 pt-6 pb-2 border-b border-slate-800">
+                {[65, 80, 72, 88, 95, 82, 90].map((val, i) => (
+                  <div key={i} className="flex-1 flex flex-col items-center gap-2 h-full justify-end group">
+                    <div className="text-[9px] font-mono text-cyan-400 opacity-0 group-hover:opacity-100 transition-opacity">{val}%</div>
+                    <div className="w-full bg-cyan-500/20 hover:bg-cyan-500/40 rounded-t-lg transition-all border-t border-cyan-400" style={{ height: `${val}%` }} />
+                    <span className="text-[10px] font-mono text-slate-400">Séb {i + 1}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Banco de Dados Histórico Tabela */}
+            <div className="bg-slate-950/90 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl">
+              <h4 className="text-xs font-mono font-bold text-slate-300 uppercase tracking-widest">
+                Banco de Dados — Histórico de Registros e Alterações
+              </h4>
+              <div className="max-h-48 overflow-y-auto space-y-2 pr-1">
+                {athletes.length === 0 ? (
+                  <p className="text-xs text-slate-500 text-center py-4">Nenhum registro no banco de dados.</p>
+                ) : (
+                  athletes.map(a => (
+                    <div key={a.id} className="bg-slate-900 border border-slate-800 rounded-xl p-3 flex items-center justify-between text-xs font-mono">
+                      <div>
+                        <span className="font-bold text-white uppercase">{a.name}</span>
+                        <span className="text-slate-400 ml-2">({a.classType || 'TURMA A'})</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="text-cyan-300">Cadastrado: {a.registeredAt || '2026-11-01'}</span>
+                        <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 rounded text-[10px]">Ativo</span>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button
+                type="button"
+                onClick={() => setShowFreqReportModal(false)}
+                className="px-6 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold font-mono transition-all cursor-pointer"
+              >
+                Fechar Relatório
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: JUSTIFICATIVA SÁBADO */}
+      {showJustificativaModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fade-in overflow-y-auto">
+          <div className="bg-[#050b14] border-2 border-red-500/60 rounded-3xl max-w-lg w-full p-6 sm:p-8 shadow-[0_0_50px_rgba(239,68,68,0.3)] relative my-8 space-y-6">
+            <button
+              onClick={() => {
+                setShowJustificativaModal(false);
+                setJustifStep(1);
+                setJustifAthleteId('');
+                setJustifReason('');
+              }}
+              className="absolute top-6 right-6 text-slate-400 hover:text-white p-2 rounded-xl bg-slate-900 border border-slate-800 cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            {/* Time Cutoff Banner */}
+            {isJustificationLocked ? (
+              <div className="bg-red-950/90 border border-red-500 text-red-300 rounded-2xl p-5 text-center space-y-3">
+                <div className="w-12 h-12 rounded-full bg-red-500/20 border border-red-400 mx-auto flex items-center justify-center text-red-400 shadow-[0_0_20px_rgba(239,68,68,0.5)]">
+                  <Lock className="w-6 h-6" />
+                </div>
+                <h3 className="text-base font-black uppercase font-mono tracking-wider">🔒 BOTÃO TRAVADO</h3>
+                <p className="text-xs leading-relaxed">
+                  O envio de justificativas é aberto de sexta-feira às 23:00 até sábado às 13:30. No momento o sistema encontra-se travado.
+                </p>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => setOverrideLock(true)}
+                    className="px-4 py-1.5 bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-cyan-500/40 rounded-xl text-[10px] font-mono font-bold"
+                  >
+                    🔓 (Modo Professor) Destravar para Teste
+                  </button>
+                )}
+              </div>
+            ) : (
+              <>
+                {/* Step 1: Select Eligible Student */}
+                {justifStep === 1 && (
+                  <div className="space-y-4">
+                    <div className="text-center pb-3 border-b border-slate-800">
+                      <span className="text-[10px] font-mono text-red-400 uppercase tracking-widest bg-red-950/80 px-3 py-1 rounded-full border border-red-800">
+                        PASSO 01 DE 02 — SELEÇÃO DE ALUNO
+                      </span>
+                      <h3 className="text-xl font-black text-white uppercase tracking-wider font-mono mt-2">QUEM É VOCÊ?</h3>
+                      <p className="text-xs text-slate-400">
+                        Apenas alunos presentes no sábado anterior aparecem na lista para justificar.
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2 bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5">
+                      <Search className="w-4 h-4 text-slate-500" />
+                      <input
+                        type="text"
+                        placeholder="Busque seu nome..."
+                        value={justifSearch}
+                        onChange={(e) => setJustifSearch(e.target.value)}
+                        className="w-full bg-transparent text-xs text-white placeholder-slate-500 focus:outline-none"
+                      />
+                    </div>
+
+                    <div className="max-h-60 overflow-y-auto space-y-2 pr-1">
+                      {athletes
+                        .filter(a => a.name.toLowerCase().includes(justifSearch.toLowerCase()))
+                        .filter(a => isAthleteEligibleForJustification(a.id))
+                        .length === 0 ? (
+                        <div className="text-center py-8 space-y-2">
+                          <p className="text-xs text-amber-400 font-mono font-bold">Nenhum aluno liberado para justificar no momento.</p>
+                          <p className="text-[10px] text-slate-500">
+                            Regra: É obrigatório ter marcado presença (P ou A) no sábado anterior. Quem faltou não aparece na lista.
+                          </p>
+                        </div>
+                      ) : (
+                        athletes
+                          .filter(a => a.name.toLowerCase().includes(justifSearch.toLowerCase()))
+                          .filter(a => isAthleteEligibleForJustification(a.id))
+                          .map(a => (
+                            <button
+                              key={a.id}
+                              type="button"
+                              onClick={() => {
+                                setJustifAthleteId(a.id);
+                                setJustifStep(2);
+                              }}
+                              className="w-full text-left bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-red-400 rounded-xl p-3.5 transition-all flex items-center justify-between group cursor-pointer"
+                            >
+                              <div>
+                                <p className="text-xs font-bold text-white uppercase font-mono group-hover:text-red-400 transition-colors">{a.name}</p>
+                                <p className="text-[10px] text-emerald-400 font-mono">✓ Liberado (Presença confirmada no sábado anterior)</p>
+                              </div>
+                              <ChevronRight className="w-4 h-4 text-red-400" />
+                            </button>
+                          ))
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Step 2: Reason & Direct Submit */}
+                {justifStep === 2 && (
+                  <div className="space-y-4">
+                    <div className="text-center pb-3 border-b border-slate-800">
+                      <span className="text-[10px] font-mono text-red-400 uppercase tracking-widest bg-red-950/80 px-3 py-1 rounded-full border border-red-800">
+                        PASSO 02 DE 02 — MOTIVO DA AUSÊNCIA
+                      </span>
+                      <h3 className="text-xl font-black text-white uppercase tracking-wider font-mono mt-2">ESCREVA O MOTIVO</h3>
+                      <p className="text-xs text-cyan-300 font-mono mt-1">
+                        {athletes.find(a => a.id === justifAthleteId)?.name}
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="block text-xs font-mono text-slate-300 uppercase">Motivo da ausência:</label>
+                      <textarea
+                        rows={4}
+                        required
+                        placeholder="Ex: Trabalho, motivo de saúde, viagem..."
+                        value={justifReason}
+                        onChange={(e) => setJustifReason(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 focus:border-red-400 rounded-xl p-3.5 text-xs text-white placeholder-slate-500 focus:outline-none font-mono"
+                      />
+                    </div>
+
+                    <div className="pt-2 flex items-center justify-between">
+                      <button
+                        type="button"
+                        onClick={() => setJustifStep(1)}
+                        className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold cursor-pointer"
+                      >
+                        Voltar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!justifReason.trim()) {
+                            alert('Por favor, escreva o motivo da ausência.');
+                            return;
+                          }
+
+                          const todayStr = now.toISOString().split('T')[0];
+                          let targetSatIndex = saturdays.findIndex(sat => sat.toISOString().split('T')[0] >= todayStr);
+                          if (targetSatIndex === -1) targetSatIndex = saturdays.length - 1;
+                          if (targetSatIndex < 0 && saturdays.length > 0) targetSatIndex = 0;
+                          const satKey = saturdays[targetSatIndex] ? saturdays[targetSatIndex].toISOString().split('T')[0] : todayStr;
+
+                          const key = `${justifAthleteId}_${satKey}`;
+                          const updatedAttendance = { ...attendance, [key]: 'J' };
+                          setAttendance(updatedAttendance);
+
+                          try {
+                            await setDoc(doc(db, 'settings', 'attendance_data'), {
+                              attendance: updatedAttendance,
+                              updatedAt: new Date().toISOString()
+                            });
+                          } catch (err) {
+                            console.error('Error saving justification attendance:', err);
+                          }
+
+                          alert('✅ Justificativa enviada e registrada com sucesso na frequência!');
+                          setShowJustificativaModal(false);
+                          setJustifStep(1);
+                          setJustifAthleteId('');
+                          setJustifReason('');
+                        }}
+                        className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-400 to-teal-400 text-slate-950 text-xs font-bold shadow-[0_0_20px_rgba(16,185,129,0.4)] flex items-center gap-2 cursor-pointer"
+                      >
+                        <CheckCircle2 className="w-4 h-4 stroke-[2.5]" />
+                        <span>Enviar Justificativa</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: CONFIRMATION POP-UP */}
+      {confirmModal.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+          <div className="bg-[#050b14] border border-cyan-500/50 rounded-2xl max-w-sm w-full p-6 shadow-2xl relative space-y-4 text-center">
+            <div className="w-12 h-12 rounded-full bg-cyan-500/20 border border-cyan-400 mx-auto flex items-center justify-center text-cyan-300 shadow-[0_0_20px_rgba(6,182,212,0.4)]">
+              <Shield className="w-6 h-6" />
+            </div>
+
+            <div>
+              <h3 className="text-base font-black text-white uppercase tracking-wider font-mono">{confirmModal.title}</h3>
+              <p className="text-xs text-slate-300 mt-2">{confirmModal.message}</p>
+            </div>
+
+            <div className="flex items-center justify-center gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+                className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold font-mono transition-all cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  confirmModal.action();
+                  setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                }}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-400 to-teal-400 text-slate-950 text-xs font-bold font-mono shadow-[0_0_15px_rgba(6,182,212,0.4)] transition-all cursor-pointer"
+              >
+                Confirmar
+              </button>
+            </div>
           </div>
         </div>
       )}
