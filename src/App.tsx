@@ -205,6 +205,11 @@ export default function App() {
   const [showFreqReportModal, setShowFreqReportModal] = useState<boolean>(false);
   const [showJustificativaModal, setShowJustificativaModal] = useState<boolean>(false);
   const [reportPeriod, setReportPeriod] = useState<'mensal' | 'trimestral' | 'semestral' | 'anual'>('mensal');
+  const [reportMonth, setReportMonth] = useState<string>('2026-10');
+  const [reportFilterType, setReportFilterType] = useState<string>('mes');
+  const [reportPeriodDays, setReportPeriodDays] = useState<string>('30');
+  const [reportPointsMonth, setReportPointsMonth] = useState<string>('2026-10');
+  const [reportPointsWindow, setReportPointsWindow] = useState<string>('1');
 
   // Justificativa Sábado State & Helpers
   const [justifStep, setJustifStep] = useState<number>(1);
@@ -460,6 +465,55 @@ export default function App() {
   const [freqYear, setFreqYear] = useState<number>(2026);
   const [freqTurmaFilter, setFreqTurmaFilter] = useState<string>('TODAS AS TURMAS');
   const [attendance, setAttendance] = useState<{ [key: string]: string }>({});
+  const [arrivalTimes, setArrivalTimes] = useState<{ [key: string]: string }>({});
+
+  const getStudentAverageArrivalMinutes = (athleteId: string) => {
+    let totalMins = 0;
+    let count = 0;
+    saturdays.forEach(sat => {
+      const satKey = sat.toISOString().split('T')[0];
+      const key = `${athleteId}_${satKey}`;
+      const status = attendance[key] || '';
+      if (status === 'P' || status === 'A') {
+        const tStr = arrivalTimes[key] || '16:45';
+        const parts = tStr.split(':');
+        if (parts.length === 2) {
+          const m = parseInt(parts[0]) * 60 + parseInt(parts[1]);
+          if (!isNaN(m)) {
+            totalMins += m;
+            count++;
+          }
+        }
+      }
+    });
+    return count > 0 ? totalMins / count : 9999;
+  };
+
+  const getStudentAverageArrivalTimeFormatted = (athleteId: string) => {
+    let totalMins = 0;
+    let count = 0;
+    saturdays.forEach(sat => {
+      const satKey = sat.toISOString().split('T')[0];
+      const key = `${athleteId}_${satKey}`;
+      const status = attendance[key] || '';
+      if (status === 'P' || status === 'A') {
+        const tStr = arrivalTimes[key] || '16:45';
+        const parts = tStr.split(':');
+        if (parts.length === 2) {
+          const m = parseInt(parts[0]) * 60 + parseInt(parts[1]);
+          if (!isNaN(m)) {
+            totalMins += m;
+            count++;
+          }
+        }
+      }
+    });
+    if (count === 0) return '—';
+    const avgM = Math.round(totalMins / count);
+    const h = Math.floor(avgM / 60);
+    const m = avgM % 60;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  };
 
   const isAthletePresentInFrequency = (athleteId: string) => {
     return Object.entries(attendance).some(([key, val]) => {
@@ -500,16 +554,34 @@ export default function App() {
     // Cycle: '' -> P -> A -> F -> J -> ''
     const next = current === '' ? 'P' : current === 'P' ? 'A' : current === 'A' ? 'F' : current === 'F' ? 'J' : '';
     setAttendance(prev => ({ ...prev, [key]: next }));
+
+    if ((next === 'P' || next === 'A') && !arrivalTimes[key]) {
+      const nowTime = new Date();
+      const h = String(nowTime.getHours()).padStart(2, '0');
+      const m = String(nowTime.getMinutes()).padStart(2, '0');
+      const timeStr = `${h}:${m}`;
+      setArrivalTimes(prev => ({ ...prev, [key]: timeStr }));
+    }
   };
 
   const setAllAttendanceForSat = (satKey: string, status: string) => {
     const updated = { ...attendance };
+    const updatedTimes = { ...arrivalTimes };
+    const nowTime = new Date();
+    const h = String(nowTime.getHours()).padStart(2, '0');
+    const m = String(nowTime.getMinutes()).padStart(2, '0');
+    const timeStr = `${h}:${m}`;
+
     filteredAthletes.forEach(a => {
       if (isAthleteActiveForSat(a, new Date(satKey))) {
         updated[`${a.id}_${satKey}`] = status;
+        if ((status === 'P' || status === 'A') && !updatedTimes[`${a.id}_${satKey}`]) {
+          updatedTimes[`${a.id}_${satKey}`] = timeStr;
+        }
       }
     });
     setAttendance(updated);
+    setArrivalTimes(updatedTimes);
   };
 
   const isAthleteActiveForSat = (a: Athlete, satDate: Date) => {
@@ -526,7 +598,7 @@ export default function App() {
 
   const handleSaveAttendance = async () => {
     try {
-      await setDoc(doc(db, 'settings', 'attendance_data'), { attendance, updatedAt: new Date().toISOString() });
+      await setDoc(doc(db, 'settings', 'attendance_data'), { attendance, arrivalTimes, updatedAt: new Date().toISOString() });
       alert('Frequência salva com sucesso no Firebase Cloud!');
     } catch (err) {
       console.error('Error saving attendance:', err);
@@ -679,8 +751,9 @@ export default function App() {
     const unsubAttendance = onSnapshot(doc(db, 'settings', 'attendance_data'), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
-        if (data && data.attendance) {
-          setAttendance(data.attendance);
+        if (data) {
+          if (data.attendance) setAttendance(data.attendance);
+          if (data.arrivalTimes) setArrivalTimes(data.arrivalTimes);
         }
       }
     }, (error) => {
@@ -2830,72 +2903,89 @@ export default function App() {
       {/* MODAL: RELATÓRIO DE FREQUÊNCIA & ANÁLISE ANALÍTICA */}
       {showFreqReportModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fade-in overflow-y-auto">
-          <div className="bg-[#050b14] border-2 border-cyan-500/60 rounded-3xl max-w-4xl w-full p-6 sm:p-8 shadow-[0_0_50px_rgba(6,182,212,0.3)] relative my-8 space-y-6">
+          <div className="bg-[#0a0a0f] border-2 border-violet-500/60 rounded-3xl max-w-6xl w-full p-6 sm:p-8 shadow-[0_0_60px_rgba(139,92,246,0.3)] relative my-8 space-y-8">
             <button
               onClick={() => setShowFreqReportModal(false)}
-              className="absolute top-6 right-6 text-slate-400 hover:text-white p-2 rounded-xl bg-slate-900 border border-slate-800 cursor-pointer"
+              className="absolute top-6 right-6 text-slate-400 hover:text-white p-2.5 rounded-xl bg-slate-900 border border-slate-800 cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
 
             {/* Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+            <div className="flex flex-col md:flex-row justify-between items-center gap-4 pb-6 border-b border-violet-500/30">
               <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-2xl bg-cyan-500/20 border border-cyan-400 flex items-center justify-center text-cyan-300 shadow-[0_0_20px_rgba(6,182,212,0.4)]">
+                <div className="w-12 h-12 rounded-2xl bg-violet-500/20 border border-violet-400 flex items-center justify-center text-violet-300 shadow-[0_0_20px_rgba(139,92,246,0.4)]">
                   <BarChart3 className="w-6 h-6" />
                 </div>
                 <div>
-                  <h3 className="text-xl font-black text-white uppercase tracking-wider font-mono">RELATÓRIO DE FREQUÊNCIA</h3>
-                  <p className="text-xs text-cyan-300 font-mono">Banco de dados com histórico de frequência e análises gráficas</p>
+                  <h3 className="text-2xl font-black text-violet-400 tracking-wider uppercase font-mono">ESTATÍSTICAS ARENA</h3>
+                  <p className="text-[10px] text-violet-300 tracking-[0.3em] uppercase font-mono mt-0.5">Apenas dados de Sábado</p>
                 </div>
               </div>
 
-              {/* Period Selector */}
-              <div className="flex items-center gap-1.5 bg-slate-950 p-1.5 rounded-xl border border-slate-800">
-                {(['mensal', 'trimestral', 'semestral', 'anual'] as const).map(p => (
-                  <button
-                    key={p}
-                    type="button"
-                    onClick={() => setReportPeriod(p)}
-                    className={`px-3 py-1.5 rounded-lg text-[10px] font-mono font-bold uppercase transition-all ${
-                      reportPeriod === p
-                        ? 'bg-cyan-500 text-slate-950 shadow-[0_0_10px_rgba(6,182,212,0.5)]'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    {p}
-                  </button>
-                ))}
+              {/* Filters */}
+              <div className="flex flex-wrap gap-2 justify-center items-center">
+                <input
+                  type="month"
+                  value={reportMonth}
+                  onChange={(e) => setReportMonth(e.target.value)}
+                  className="bg-[#1a1a2e] border border-violet-500 text-white px-3 py-1.5 rounded-xl text-xs font-mono outline-none"
+                />
+                <select
+                  value={reportFilterType}
+                  onChange={(e) => setReportFilterType(e.target.value)}
+                  className="bg-[#1a1a2e] border border-violet-500 text-white px-3 py-1.5 rounded-xl text-xs font-mono uppercase outline-none"
+                >
+                  <option value="mes">Apenas o Mês</option>
+                  <option value="bimestre">Bimestre</option>
+                  <option value="trimestre">Trimestre</option>
+                  <option value="semestre">Semestre</option>
+                  <option value="ano">Ano Inteiro</option>
+                </select>
+                <select
+                  value={reportPeriodDays}
+                  onChange={(e) => setReportPeriodDays(e.target.value)}
+                  className="bg-[#1a1a2e] border border-violet-500 text-white px-3 py-1.5 rounded-xl text-xs font-mono uppercase outline-none"
+                >
+                  <option value="30">Últimos 30 dias</option>
+                  <option value="60">Últimos 60 dias</option>
+                  <option value="90">Últimos 90 dias</option>
+                  <option value="120">Últimos 120 dias</option>
+                </select>
               </div>
             </div>
 
-            {/* 3 Analytics Charts Grid */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              
-              {/* Chart 1: Alunos por Turma (Pizza / Donut) */}
-              <div className="bg-slate-950/90 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-mono font-bold text-cyan-400 uppercase tracking-widest">
-                    1. Alunos por Turma (Quantidade)
-                  </h4>
-                  <span className="text-[10px] font-mono bg-cyan-950 text-cyan-300 px-2 py-0.5 rounded border border-cyan-800">PIZZA</span>
-                </div>
+            {/* Summary Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="bg-white/[0.03] backdrop-blur-md p-6 rounded-2xl text-center border-b-4 border-violet-500 border border-violet-500/20">
+                <h3 className="text-xs uppercase text-violet-400 font-mono tracking-widest mb-1">Alunos em Sábados</h3>
+                <p className="text-4xl font-black font-mono text-white">
+                  {athletes.filter(a => saturdays.some(sat => attendance[`${a.id}_${sat.toISOString().split('T')[0]}`] === 'P' || attendance[`${a.id}_${sat.toISOString().split('T')[0]}`] === 'A')).length || athletes.length}
+                </p>
+              </div>
+              <div className="bg-white/[0.03] backdrop-blur-md p-6 rounded-2xl text-center border-b-4 border-cyan-500 border border-cyan-500/20">
+                <h3 className="text-xs uppercase text-cyan-400 font-mono tracking-widest mb-1">Turmas Ativas (Sáb)</h3>
+                <p className="text-4xl font-black font-mono text-white">{classes.length}</p>
+              </div>
+            </div>
 
+            {/* 3 Charts Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              {/* Chart 1: Alunos por Turma */}
+              <div className="bg-white/[0.03] backdrop-blur-md p-6 rounded-2xl border border-violet-500/20 space-y-4">
+                <h4 className="text-sm font-bold uppercase text-violet-300 font-mono tracking-wider">Alunos por Turma</h4>
                 <div className="flex flex-col sm:flex-row items-center justify-center gap-6 py-4">
-                  {/* Visual Donut representation */}
-                  <div className="relative w-36 h-36 rounded-full border-8 border-cyan-500/30 flex items-center justify-center shadow-[0_0_20px_rgba(6,182,212,0.2)]">
-                    <div className="absolute inset-0 rounded-full border-8 border-cyan-400 border-t-transparent animate-spin duration-1000" />
+                  <div className="relative w-36 h-36 rounded-full border-8 border-violet-500/30 flex items-center justify-center shadow-[0_0_25px_rgba(139,92,246,0.3)]">
                     <div className="text-center">
                       <span className="text-2xl font-black text-white font-mono">{athletes.length}</span>
-                      <p className="text-[9px] font-mono text-slate-400 uppercase">Total Alunos</p>
+                      <p className="text-[9px] font-mono text-violet-400 uppercase">Total Alunos</p>
                     </div>
                   </div>
-
                   <div className="space-y-2 text-xs font-mono">
                     {Array.from(new Set(athletes.map(a => a.classType || 'TURMA A'))).map((turma, idx) => {
                       const count = athletes.filter(a => (a.classType || 'TURMA A') === turma).length;
-                      const colors = ['text-cyan-400', 'text-emerald-400', 'text-amber-400', 'text-pink-400', 'text-purple-400'];
-                      const dots = ['bg-cyan-400', 'bg-emerald-400', 'bg-amber-400', 'bg-pink-400', 'bg-purple-400'];
+                      const colors = ['text-cyan-400', 'text-amber-400', 'text-rose-400', 'text-violet-400', 'text-pink-400'];
+                      const dots = ['bg-cyan-400', 'bg-amber-400', 'bg-rose-400', 'bg-violet-400', 'bg-pink-400'];
                       return (
                         <div key={turma} className="flex items-center justify-between gap-6">
                           <div className="flex items-center gap-2">
@@ -2910,99 +3000,237 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Chart 2: Desempenho das Turmas (Presença e Falta) (Colunas) */}
-              <div className="bg-slate-950/90 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl">
+              {/* Chart 2: Presença vs Faltas */}
+              <div className="bg-white/[0.03] backdrop-blur-md p-6 rounded-2xl border border-cyan-500/20 space-y-4">
                 <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-mono font-bold text-emerald-400 uppercase tracking-widest">
-                    2. Desempenho (Presenças vs Faltas)
-                  </h4>
-                  <span className="text-[10px] font-mono bg-emerald-950 text-emerald-300 px-2 py-0.5 rounded border border-emerald-800">COLUNAS</span>
+                  <h4 className="text-sm font-bold uppercase text-cyan-300 font-mono tracking-wider">Presença vs Faltas (Sábados)</h4>
+                  <div className="flex items-center gap-3 text-[10px] font-mono">
+                    <span className="flex items-center gap-1 text-emerald-400"><span className="w-2.5 h-2.5 rounded bg-emerald-500 inline-block" /> Presenças</span>
+                    <span className="flex items-center gap-1 text-rose-400"><span className="w-2.5 h-2.5 rounded bg-rose-500 inline-block" /> Faltas</span>
+                  </div>
                 </div>
-
                 <div className="space-y-3 pt-2">
-                  {Array.from(new Set(athletes.map(a => a.classType || 'TURMA A'))).map((turma, idx) => {
+                  {Array.from(new Set(athletes.map(a => a.classType || 'TURMA A'))).map((turma) => {
                     const turmaAthletes = athletes.filter(a => (a.classType || 'TURMA A') === turma);
-                    let presCount = 0;
-                    let faltaCount = 0;
+                    let pCount = 0;
+                    let fCount = 0;
                     turmaAthletes.forEach(a => {
-                      Object.entries(attendance).forEach(([k, v]) => {
-                        if (k.startsWith(a.id + '_')) {
-                          if (v === 'P' || v === 'A') presCount++;
-                          if (v === 'F' || v === 'J') faltaCount++;
-                        }
+                      saturdays.forEach(sat => {
+                        const st = attendance[`${a.id}_${sat.toISOString().split('T')[0]}`] || '';
+                        if (st === 'P' || st === 'A') pCount++;
+                        if (st === 'F' || st === 'J') fCount++;
                       });
                     });
-                    const total = Math.max(1, presCount + faltaCount);
-                    const presPct = Math.round((presCount / total) * 100);
-
+                    const total = Math.max(1, pCount + fCount);
+                    const pPct = Math.round((pCount / total) * 100);
                     return (
-                      <div key={turma} className="space-y-1">
-                        <div className="flex justify-between text-xs font-mono">
+                      <div key={turma} className="space-y-1 font-mono">
+                        <div className="flex justify-between text-xs">
                           <span className="text-white font-bold">{turma}</span>
-                          <span className="text-emerald-400">{presCount} Presenças / {faltaCount} Faltas</span>
+                          <span className="text-cyan-400">{pCount} P / {fCount} F</span>
                         </div>
                         <div className="w-full h-3 bg-slate-900 rounded-full overflow-hidden flex border border-slate-800">
-                          <div className="bg-emerald-500 h-full transition-all" style={{ width: `${presPct}%` }} />
-                          <div className="bg-red-500 h-full transition-all" style={{ width: `${100 - presPct}%` }} />
+                          <div className="bg-emerald-500 h-full transition-all" style={{ width: `${pPct}%` }} />
+                          <div className="bg-rose-500 h-full transition-all" style={{ width: `${100 - pPct}%` }} />
                         </div>
                       </div>
                     );
                   })}
                 </div>
               </div>
-
             </div>
 
-            {/* Chart 3: Desempenho das Turmas (Presenças) (Linhas) */}
-            <div className="bg-slate-950/90 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl">
-              <div className="flex items-center justify-between">
-                <h4 className="text-xs font-mono font-bold text-amber-400 uppercase tracking-widest">
-                  3. Evolução de Presenças ({reportPeriod.toUpperCase()})
-                </h4>
-                <span className="text-[10px] font-mono bg-amber-950 text-amber-300 px-2 py-0.5 rounded border border-amber-800">LINHAS</span>
-              </div>
-
-              <div className="h-36 flex items-end justify-between gap-4 px-4 pt-6 pb-2 border-b border-slate-800">
-                {[65, 80, 72, 88, 95, 82, 90].map((val, i) => (
-                  <div key={i} className="flex-1 flex flex-col items-center gap-2 h-full justify-end group">
-                    <div className="text-[9px] font-mono text-cyan-400 opacity-0 group-hover:opacity-100 transition-opacity">{val}%</div>
-                    <div className="w-full bg-cyan-500/20 hover:bg-cyan-500/40 rounded-t-lg transition-all border-t border-cyan-400" style={{ height: `${val}%` }} />
-                    <span className="text-[10px] font-mono text-slate-400">Séb {i + 1}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Banco de Dados Histórico Tabela */}
-            <div className="bg-slate-950/90 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl">
-              <h4 className="text-xs font-mono font-bold text-slate-300 uppercase tracking-widest">
-                Banco de Dados — Histórico de Registros e Alterações
-              </h4>
-              <div className="max-h-48 overflow-y-auto space-y-2 pr-1">
-                {athletes.length === 0 ? (
-                  <p className="text-xs text-slate-500 text-center py-4">Nenhum registro no banco de dados.</p>
-                ) : (
-                  athletes.map(a => (
-                    <div key={a.id} className="bg-slate-900 border border-slate-800 rounded-xl p-3 flex items-center justify-between text-xs font-mono">
-                      <div>
-                        <span className="font-bold text-white uppercase">{a.name}</span>
-                        <span className="text-slate-400 ml-2">({a.classType || 'TURMA A'})</span>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className="text-cyan-300">Cadastrado: {a.registeredAt || '2026-11-01'}</span>
-                        <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 rounded text-[10px]">Ativo</span>
-                      </div>
+            {/* Chart 3: Evolução de Presenças */}
+            <div className="bg-white/[0.03] backdrop-blur-md p-6 rounded-2xl border border-emerald-500/20 space-y-4">
+              <h4 className="text-sm font-bold uppercase text-emerald-300 font-mono tracking-wider">Evolução de Presenças aos Sábados</h4>
+              <div className="h-44 flex items-end justify-between gap-4 px-4 pt-6 pb-2 border-b border-slate-800">
+                {saturdays.map((sat, i) => {
+                  const satKey = sat.toISOString().split('T')[0];
+                  let presTotal = 0;
+                  athletes.forEach(a => {
+                    const st = attendance[`${a.id}_${satKey}`] || '';
+                    if (st === 'P' || st === 'A') presTotal++;
+                  });
+                  const heightPct = Math.min(100, Math.max(15, (presTotal / Math.max(1, athletes.length)) * 100));
+                  return (
+                    <div key={satKey} className="flex-1 flex flex-col items-center gap-2 h-full justify-end group">
+                      <div className="text-[10px] font-mono text-emerald-400 font-bold">{presTotal}</div>
+                      <div className="w-full bg-emerald-500/30 group-hover:bg-emerald-500/60 rounded-t-lg transition-all border-t border-emerald-400" style={{ height: `${heightPct}%` }} />
+                      <span className="text-[10px] font-mono text-slate-400">Séb {i + 1}</span>
                     </div>
-                  ))
-                )}
+                  );
+                })}
               </div>
             </div>
 
-            <div className="flex justify-end pt-2">
+            {/* Rankings Grid (Mais Frequentes & Mais Faltas) */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              {/* Mais Frequentes */}
+              <div className="bg-white/[0.03] backdrop-blur-md p-6 rounded-2xl border-t-2 border-emerald-500 border border-slate-800 space-y-4">
+                <h4 className="text-sm font-bold uppercase text-emerald-400 font-mono flex items-center gap-2">
+                  <Star className="w-4 h-4 text-emerald-400" /> Ranking Sábado: 15 Mais Frequentes
+                </h4>
+                <div className="max-h-60 overflow-y-auto space-y-2 pr-1 font-mono">
+                  {athletes
+                    .map(a => {
+                      let pTotal = 0;
+                      saturdays.forEach(sat => {
+                        const st = attendance[`${a.id}_${sat.toISOString().split('T')[0]}`] || '';
+                        if (st === 'P' || st === 'A') pTotal++;
+                      });
+                      return { ...a, pTotal };
+                    })
+                    .sort((a, b) => b.pTotal - a.pTotal)
+                    .slice(0, 15)
+                    .map((a, idx) => (
+                      <div key={a.id} className="flex items-center justify-between bg-slate-950/70 p-2.5 rounded-xl border border-slate-800/80 text-xs">
+                        <span className="font-bold text-white uppercase">{idx + 1}. {a.name}</span>
+                        <div className="flex items-center gap-4">
+                          <span className="text-slate-400 text-[10px]">{a.classType || 'TURMA A'}</span>
+                          <span className="font-black text-emerald-400">{a.pTotal} presenças</span>
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              </div>
+
+              {/* Mais Faltas */}
+              <div className="bg-white/[0.03] backdrop-blur-md p-6 rounded-2xl border-t-2 border-rose-500 border border-slate-800 space-y-4">
+                <h4 className="text-sm font-bold uppercase text-rose-400 font-mono flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-400" /> Ranking Sábado: 15 Mais Faltas
+                </h4>
+                <div className="max-h-60 overflow-y-auto space-y-2 pr-1 font-mono">
+                  {athletes
+                    .map(a => {
+                      let fTotal = 0;
+                      saturdays.forEach(sat => {
+                        const st = attendance[`${a.id}_${sat.toISOString().split('T')[0]}`] || '';
+                        if (st === 'F' || st === 'J') fTotal++;
+                      });
+                      return { ...a, fTotal };
+                    })
+                    .sort((a, b) => b.fTotal - a.fTotal)
+                    .slice(0, 15)
+                    .map((a, idx) => (
+                      <div key={a.id} className="flex items-center justify-between bg-slate-950/70 p-2.5 rounded-xl border border-slate-800/80 text-xs">
+                        <span className="font-bold text-white uppercase">{idx + 1}. {a.name}</span>
+                        <div className="flex items-center gap-4">
+                          <span className="text-slate-400 text-[10px]">{a.classType || 'TURMA A'}</span>
+                          <span className="font-black text-rose-400">{a.fTotal} faltas</span>
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            </div>
+
+            {/* ===== RELATÓRIO DE PONTUAÇÃO ===== */}
+            <div className="pt-6 border-t border-violet-500/30 space-y-6">
+              <div className="flex flex-col md:flex-row justify-between items-center gap-4">
+                <h4 className="text-xl font-bold text-violet-400 font-mono uppercase tracking-wider flex items-center gap-2">
+                  <Award className="w-5 h-5 text-violet-400" /> Relatório de Pontuação
+                </h4>
+                <div className="flex gap-2 items-center">
+                  <input
+                    type="month"
+                    value={reportPointsMonth}
+                    onChange={(e) => setReportPointsMonth(e.target.value)}
+                    className="bg-[#1a1a2e] border border-violet-500 text-white px-3 py-1.5 rounded-xl text-xs font-mono outline-none"
+                  />
+                  <select
+                    value={reportPointsWindow}
+                    onChange={(e) => setReportPointsWindow(e.target.value)}
+                    className="bg-[#1a1a2e] border border-violet-500 text-white px-3 py-1.5 rounded-xl text-xs font-mono uppercase outline-none"
+                  >
+                    <option value="1">Mês Atual</option>
+                    <option value="2">Mês Atual + Anterior</option>
+                    <option value="3">Mês Atual + 2 Anteriores</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Legend */}
+              <div className="bg-white/[0.03] backdrop-blur-md p-3 rounded-xl flex flex-wrap gap-4 justify-center text-xs font-mono border border-violet-500/20">
+                <span className="text-slate-400 tracking-wider">SISTEMA:</span>
+                <span><span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-bold">P Presença</span> <strong className="text-emerald-400">+5 pts</strong></span>
+                <span><span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-400 font-bold">A Atraso</span> <strong className="text-amber-400">+2 pts</strong></span>
+                <span><span className="px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-400 font-bold">J Justificativa</span> <strong className="text-rose-400">−1 pt</strong></span>
+                <span><span className="px-2 py-0.5 rounded bg-rose-500/20 text-rose-400 font-bold">F Falta</span> <strong className="text-rose-400">−3 pts</strong></span>
+              </div>
+
+              {/* Scoring Table */}
+              <div className="bg-white/[0.03] backdrop-blur-md p-6 rounded-2xl border-t-2 border-violet-500 border border-slate-800 overflow-x-auto">
+                <table className="w-full text-left border-collapse min-w-[700px] font-mono text-xs">
+                  <thead>
+                    <tr className="border-b border-violet-500/30 text-violet-400 uppercase">
+                      <th className="p-3 w-10 text-center">#</th>
+                      <th className="p-3">Aluno</th>
+                      <th className="p-3">Turma</th>
+                      <th className="p-3 text-center">P</th>
+                      <th className="p-3 text-center">A</th>
+                      <th className="p-3 text-center">J</th>
+                      <th className="p-3 text-center">F</th>
+                      <th className="p-3 text-center text-violet-300">Média Cheg.</th>
+                      <th className="p-3 text-center text-emerald-400">Q <span className="px-1.5 py-0.5 bg-emerald-500/20 rounded text-[10px]">{saturdays.length}</span></th>
+                      <th className="p-3 text-right">Pontuação</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60">
+                    {athletes
+                      .map(a => {
+                        let P = 0, A = 0, J = 0, F = 0;
+                        saturdays.forEach(sat => {
+                          const st = attendance[`${a.id}_${sat.toISOString().split('T')[0]}`] || '';
+                          if (st === 'P') P++;
+                          else if (st === 'A') A++;
+                          else if (st === 'J') J++;
+                          else if (st === 'F') F++;
+                        });
+                        const pontos = P * 5 + A * 2 + J * (-1) + F * (-3);
+                        const qAluno = P + A + J + F;
+                        const avgArrivalMins = getStudentAverageArrivalMinutes(a.id);
+                        return { ...a, P, A, J, F, pontos, qAluno, avgArrivalMins };
+                      })
+                      .sort((a, b) => {
+                        if (b.pontos !== a.pontos) return b.pontos - a.pontos;
+                        if (a.avgArrivalMins !== b.avgArrivalMins) return a.avgArrivalMins - b.avgArrivalMins;
+                        return b.P - a.P;
+                      })
+                      .map((a, idx) => {
+                        const medals = ['🥇', '🥈', '🥉'];
+                        const posLabel = idx < 3 ? medals[idx] : `${idx + 1}º`;
+                        const scoreClass = a.pontos > 0 ? 'text-emerald-400 font-bold' : a.pontos < 0 ? 'text-rose-400 font-bold' : 'text-slate-500 font-bold';
+                        return (
+                          <tr key={a.id} className="hover:bg-white/[0.02]">
+                            <td className="p-3 text-center font-black">{posLabel}</td>
+                            <td className="p-3 font-bold text-white uppercase">{a.name}</td>
+                            <td className="p-3 text-slate-400">{a.classType || 'TURMA A'}</td>
+                            <td className="p-3 text-center"><span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-bold">{a.P}</span></td>
+                            <td className="p-3 text-center"><span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-400 font-bold">{a.A}</span></td>
+                            <td className="p-3 text-center"><span className="px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-400 font-bold">{a.J}</span></td>
+                            <td className="p-3 text-center"><span className="px-2 py-0.5 rounded bg-rose-500/20 text-rose-400 font-bold">{a.F}</span></td>
+                            <td className="p-3 text-center text-violet-300">{getStudentAverageArrivalTimeFormatted(a.id)}</td>
+                            <td className="p-3 text-center text-emerald-400 font-bold">{a.qAluno}/{saturdays.length}</td>
+                            <td className="p-3 text-right">
+                              <span className={scoreClass}>{a.pontos > 0 ? `+${a.pontos}` : a.pontos} pts</span>
+                              <div className="inline-block w-16 h-1.5 bg-slate-900 rounded-full ml-2 overflow-hidden align-middle border border-slate-800">
+                                <div className="h-full bg-violet-500 rounded-full" style={{ width: `${Math.max(10, Math.min(100, (Math.abs(a.pontos) / 30) * 100))}%` }} />
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            {/* ===== FIM RELATÓRIO DE PONTUAÇÃO ===== */}
+
+            <div className="flex justify-end pt-4">
               <button
                 type="button"
                 onClick={() => setShowFreqReportModal(false)}
-                className="px-6 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold font-mono transition-all cursor-pointer"
+                className="px-6 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold font-mono transition-all cursor-pointer shadow-[0_0_15px_rgba(139,92,246,0.4)]"
               >
                 Fechar Relatório
               </button>

@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TSUNAMI - Relatórios (Sábados)</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        body { background: #0a0a0f; color: white; font-family: 'Segoe UI', sans-serif; min-height: 100vh; }
+        .glass { background: rgba(255, 255, 255, 0.03); backdrop-filter: blur(10px); border: 1px solid rgba(139, 92, 246, 0.1); }
+        .neon-violet { color: #8b5cf6; text-shadow: 0 0 10px rgba(139, 92, 246, 0.5); }
+        .btn-violet { border: 1px solid #8b5cf6; background: rgba(139, 92, 246, 0.1); transition: 0.3s; }
+        .btn-violet:hover { background: #8b5cf6; color: white; }
+        .chart-container { position: relative; height: 350px; width: 100%; }
+        select, input[type="month"] { background: #1a1a2e; border: 1px solid #8b5cf6; color: white; padding: 5px 10px; border-radius: 8px; outline: none; font-size: 12px; }
+        .table-ranking { width: 100%; font-size: 13px; }
+        .table-ranking th { text-align: left; padding: 8px; border-bottom: 1px solid rgba(139, 92, 246, 0.2); color: #8b5cf6; position: sticky; top: 0; background: #0a0a0f; }
+        .table-ranking td { padding: 8px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
+        .ranking-container { max-height: 600px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #8b5cf6 transparent; }
+        /* Seção de Pontuação */
+        .pts-pos { color: #10b981; font-weight: bold; }
+        .pts-neg { color: #f43f5e; font-weight: bold; }
+        .pts-zero { color: rgba(255,255,255,0.4); font-weight: bold; }
+        .pill-status { display: inline-block; padding: 1px 6px; border-radius: 5px; font-size: 11px; font-weight: bold; }
+        .pill-p { background: rgba(16,185,129,0.15); color: #10b981; }
+        .pill-a { background: rgba(245,158,11,0.15); color: #f59e0b; }
+        .pill-j { background: rgba(6,182,212,0.15); color: #06b6d4; }
+        .pill-f { background: rgba(244,63,94,0.15); color: #f43f5e; }
+        .bar-wrap { display: inline-block; width: 60px; height: 5px; background: rgba(255,255,255,0.08); border-radius: 99px; overflow: hidden; vertical-align: middle; margin-left: 6px; }
+        .bar-fill { height: 100%; border-radius: 99px; }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+    <div class="max-w-6xl mx-auto">
+        <div class="flex flex-col md:flex-row justify-between items-center gap-4 mb-10">
+            <a href="index.html" class="btn-violet px-4 py-2 rounded-lg text-sm uppercase font-bold text-white">
+                <i class="fas fa-arrow-left mr-2"></i> Voltar
+            </a>
+            <div class="text-center">
+                <h1 class="text-3xl font-bold neon-violet tracking-widest uppercase">Estatísticas Arena</h1>
+                <p class="text-[10px] text-violet-400 tracking-[0.3em] uppercase mt-1">Apenas dados de Sábado</p>
+            </div>
+            
+            <div class="flex flex-wrap gap-2 justify-center">
+                <input type="month" id="mesReferencia" onchange="processarDados()">
+
+                <select id="filtroTipo" onchange="processarDados()">
+                    <option value="mes">Apenas o Mês</option>
+                    <option value="bimestre">Bimestre</option>
+                    <option value="trimestre">Trimestre</option>
+                    <option value="semestre">Semestre</option>
+                    <option value="ano">Ano Inteiro</option>
+                </select>
+
+                <select id="filtroPeriodo" onchange="processarDados()">
+                    <option value="30">Últimos 30 dias</option>
+                    <option value="60">Últimos 60 dias</option>
+                    <option value="90">Últimos 90 dias</option>
+                    <option value="120">Últimos 120 dias</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+            <div class="glass p-6 rounded-2xl text-center border-b-4 border-violet-500">
+                <h3 class="text-xs uppercase text-violet-400 mb-1">Alunos em Sábados</h3>
+                <p id="totalAlunos" class="text-4xl font-bold">0</p>
+            </div>
+            <div class="glass p-6 rounded-2xl text-center border-b-4 border-cyan-500">
+                <h3 class="text-xs uppercase text-cyan-400 mb-1">Turmas Ativas (Sáb)</h3>
+                <p id="totalTurmas" class="text-4xl font-bold">0</p>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
+            <div class="glass p-6 rounded-2xl">
+                <h3 class="text-sm font-bold uppercase mb-4 text-violet-300">Alunos por Turma</h3>
+                <div class="chart-container"><canvas id="chartPizza"></canvas></div>
+            </div>
+            <div class="glass p-6 rounded-2xl">
+                <h3 class="text-sm font-bold uppercase mb-4 text-cyan-300">Presença vs Faltas (Sábados)</h3>
+                <div class="chart-container"><canvas id="chartColunas"></canvas></div>
+            </div>
+            <div class="glass p-6 rounded-2xl md:col-span-2">
+                <h3 class="text-sm font-bold uppercase mb-4 text-emerald-300">Evolução de Presenças aos Sábados</h3>
+                <div class="chart-container"><canvas id="chartLinhas"></canvas></div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div class="glass p-6 rounded-2xl border-t-2 border-emerald-500">
+                <h3 class="text-sm font-bold uppercase mb-4 text-emerald-400"><i class="fas fa-star mr-2"></i> Ranking Sábado: 15 Mais Frequentes</h3>
+                <div class="ranking-container">
+                    <table class="table-ranking" id="rankingPresenca">
+                        <thead><tr><th>Aluno</th><th>Turma</th><th class="text-right">Total</th></tr></thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="glass p-6 rounded-2xl border-t-2 border-rose-500">
+                <h3 class="text-sm font-bold uppercase mb-4 text-rose-400"><i class="fas fa-exclamation-triangle mr-2"></i> Ranking Sábado: 15 Mais Faltas</h3>
+                <div class="ranking-container">
+                    <table class="table-ranking" id="rankingFaltas">
+                        <thead><tr><th>Aluno</th><th>Turma</th><th class="text-right">Total</th></tr></thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== RELATÓRIO DE PONTUAÇÃO ===== -->
+        <div class="mt-10">
+            <div class="flex flex-col md:flex-row justify-between items-center gap-4 mb-6">
+                <h2 class="text-xl font-bold neon-violet tracking-widest uppercase">
+                    <i class="fas fa-trophy mr-2"></i> Relatório de Pontuação
+                </h2>
+                <div class="flex flex-wrap gap-2 justify-center items-center">
+                    <input type="month" id="mesRefPontos" onchange="processarPontuacao()">
+                    <select id="filtroJanelaPontos" onchange="processarPontuacao()">
+                        <option value="1">Mês Atual</option>
+                        <option value="2">Mês Atual + Anterior</option>
+                        <option value="3">Mês Atual + 2 Anteriores</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Legenda -->
+            <div class="glass p-3 rounded-xl mb-4 flex flex-wrap gap-4 justify-center text-xs">
+                <span style="color:rgba(255,255,255,0.4);letter-spacing:.1em;">SISTEMA:</span>
+                <span><span class="pill-status pill-p">P Presença</span> <b class="pts-pos">+5 pts</b></span>
+                <span><span class="pill-status pill-a">A Atraso</span> <b style="color:#f59e0b;font-weight:bold;">+2 pts</b></span>
+                <span><span class="pill-status pill-j">J Justificativa</span> <b class="pts-neg">−1 pt</b></span>
+                <span><span class="pill-status pill-f">F Falta</span> <b class="pts-neg">−3 pts</b></span>
+            </div>
+
+            <!-- Tabela de pontuação -->
+            <div class="glass p-6 rounded-2xl border-t-2 border-violet-500">
+                <div class="ranking-container">
+                    <table class="table-ranking" id="tabelaPontuacao">
+                        <thead>
+                            <tr>
+                                <th style="width:36px;">#</th>
+                                <th>Aluno</th>
+                                <th>Turma</th>
+                                <th class="text-center">P</th>
+                                <th class="text-center">A</th>
+                                <th class="text-center">J</th>
+                                <th class="text-center">F</th>
+                                <th class="text-center" style="color:#a78bfa;">Média Cheg.</th>
+                                <th class="text-center" title="Quantidade de sábados (arenas) no período" style="color:#10b981;cursor:help;">
+                                    Q <span id="badgeArenas" style="background:rgba(16,185,129,0.15);color:#10b981;border-radius:99px;padding:1px 6px;font-size:10px;font-weight:bold;">0</span>
+                                </th>
+                                <th class="text-right">Pontuação</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+                <p id="semDadosPontos" class="text-center text-gray-500 text-sm py-6" style="display:none;">Nenhum dado encontrado para este período.</p>
+            </div>
+        </div>
+        <!-- ===== FIM RELATÓRIO DE PONTUAÇÃO ===== -->
+
+    </div>
+
+    <script>
+        let charts = {};
+        const CORES_PALETA = ['#06b6d4', '#f59e0b', '#f43f5e', '#8b5cf6', '#ec4899', '#3b82f6', '#ffffff'];
+
+        // Define o mês atual como padrão no input
+        document.getElementById('mesReferencia').value = new Date().toISOString().slice(0, 7);
+
+        function initCharts() {
+            const config = { 
+                plugins: { legend: { labels: { color: 'white', font: { size: 10 }, usePointStyle: true } } }, 
+                maintainAspectRatio: false 
+            };
+            charts.pizza = new Chart(document.getElementById('chartPizza'), { type: 'pie', data: { labels: [], datasets: [{ data: [], backgroundColor: CORES_PALETA }] }, options: config });
+            charts.colunas = new Chart(document.getElementById('chartColunas'), { type: 'bar', data: { labels: [], datasets: [{ label: 'Presenças', backgroundColor: '#10b981', data: [] }, { label: 'Faltas', backgroundColor: '#f43f5e', data: [] }] }, options: { ...config, scales: { x: { ticks: { color: 'white' } }, y: { ticks: { color: 'white' }, beginAtZero: true } } } });
+            charts.linhas = new Chart(document.getElementById('chartLinhas'), { type: 'line', data: { labels: [], datasets: [] }, options: { ...config, scales: { x: { ticks: { color: 'white' } }, y: { ticks: { color: 'white' }, beginAtZero: true, stepSize: 1 } } } });
+        }
+
+        function processarDados() {
+            const alunos = JSON.parse(localStorage.getItem('tsunami_alunos')) || [];
+            const freq = JSON.parse(localStorage.getItem('tsunami_freq')) || {};
+            
+            const mesRefValue = document.getElementById('mesReferencia').value;
+            const tipoPeriodo = document.getElementById('filtroTipo').value;
+            const diasComparativo = parseInt(document.getElementById('filtroPeriodo').value);
+            
+            if (!mesRefValue) return;
+
+            const [anoRef, mesRef0] = mesRefValue.split('-').map(Number);
+            const dataFinalFiltro = new Date(anoRef, mesRef0, 0); // Último dia do mês selecionado
+            const dataInicialFiltro = new Date(dataFinalFiltro);
+            dataInicialFiltro.setDate(dataFinalFiltro.getDate() - diasComparativo);
+
+            const mapaAlunos = {};
+            const statsIndividuais = {}; 
+
+            alunos.forEach(a => { 
+                const nomeKey = a.nome.trim().toUpperCase();
+                mapaAlunos[nomeKey] = a.turma || "S/T";
+                statsIndividuais[nomeKey] = { P: 0, F: 0, turma: a.turma || "S/T", nomeOriginal: a.nome };
+            });
+            
+            const dadosTurmaColunas = {};
+            const evolucaoPorData = {}; 
+            let contagemAlunosSabado = new Set();
+
+            Object.entries(freq).forEach(([chave, status]) => {
+                if (chave.endsWith('-txt')) return;
+                const partes = chave.split('|');
+                if (partes.length < 2) return;
+                
+                const nomeRaw = partes[0].trim().toUpperCase();
+                const dataISO = partes[1];
+                const dataF = new Date(dataISO + "T00:00:00");
+
+                if (dataF.getDay() !== 6) return; // Só Sábados
+
+                let dentroDoPeriodo = false;
+
+                // 1. Verificar Janela de Dias (Comparativo Real)
+                if (dataF >= dataInicialFiltro && dataF <= dataFinalFiltro) {
+                    
+                    // 2. Refinar por Tipo de Período Acadêmico
+                    const mRef = mesRef0 - 1; // 0-11
+                    const mData = dataF.getMonth();
+                    
+                    if (tipoPeriodo === 'mes' && mData === mRef) dentroDoPeriodo = true;
+                    else if (tipoPeriodo === 'bimestre' && mData >= (mRef - 1) && mData <= mRef) dentroDoPeriodo = true;
+                    else if (tipoPeriodo === 'trimestre' && mData >= (mRef - 2) && mData <= mRef) dentroDoPeriodo = true;
+                    else if (tipoPeriodo === 'semestre' && mData >= (mRef - 5) && mData <= mRef) dentroDoPeriodo = true;
+                    else if (tipoPeriodo === 'ano' && dataF.getFullYear() === anoRef) dentroDoPeriodo = true;
+                }
+
+                if (dentroDoPeriodo) {
+                    const tNome = mapaAlunos[nomeRaw] || "S/T";
+                    if (!dadosTurmaColunas[tNome]) dadosTurmaColunas[tNome] = { P: 0, F: 0 };
+                    if (!evolucaoPorData[dataISO]) evolucaoPorData[dataISO] = {};
+                    
+                    contagemAlunosSabado.add(nomeRaw);
+
+                    if (status === 'P' || status === 'A') {
+                        dadosTurmaColunas[tNome].P++;
+                        evolucaoPorData[dataISO][tNome] = (evolucaoPorData[dataISO][tNome] || 0) + 1;
+                        if (statsIndividuais[nomeRaw]) statsIndividuais[nomeRaw].P++;
+                    } else if (status === 'F') {
+                        dadosTurmaColunas[tNome].F++;
+                        if (statsIndividuais[nomeRaw]) statsIndividuais[nomeRaw].F++;
+                    }
+                }
+            });
+
+            // Atualiza UI
+            document.getElementById('totalAlunos').innerText = contagemAlunosSabado.size;
+            document.getElementById('totalTurmas').innerText = Object.keys(dadosTurmaColunas).length;
+
+            // Pizza
+            charts.pizza.data.labels = Object.keys(dadosTurmaColunas);
+            charts.pizza.data.datasets[0].data = Object.keys(dadosTurmaColunas).map(t => {
+                return alunos.filter(a => (a.turma || "S/T") === t).length;
+            });
+            charts.pizza.update();
+
+            // Colunas
+            charts.colunas.data.labels = Object.keys(dadosTurmaColunas);
+            charts.colunas.data.datasets[0].data = Object.values(dadosTurmaColunas).map(d => d.P);
+            charts.colunas.data.datasets[1].data = Object.values(dadosTurmaColunas).map(d => d.F);
+            charts.colunas.update();
+
+            // Linhas
+            const datasOrd = Object.keys(evolucaoPorData).sort();
+            charts.linhas.data.labels = datasOrd.map(d => d.split('-').reverse().slice(0,2).join('/'));
+            const turmasUnicas = Object.keys(dadosTurmaColunas).sort();
+            const dataPointsGeral = datasOrd.map(dt => turmasUnicas.reduce((s, t) => s + (evolucaoPorData[dt][t] || 0), 0));
+            const datasetsFinal = [{ label: "PRESENÇA TOTAL (SÁB)", data: dataPointsGeral, borderColor: '#10b981', backgroundColor: 'rgba(16, 185, 129, 0.1)', borderWidth: 4, fill: true, tension: 0.3, pointRadius: 5 }];
+            
+            turmasUnicas.forEach((t, idx) => {
+                const pts = datasOrd.map(dt => evolucaoPorData[dt][t] || 0);
+                datasetsFinal.push({ label: t, data: pts, borderColor: CORES_PALETA[idx % CORES_PALETA.length], backgroundColor: 'transparent', borderWidth: 2, tension: 0.3 });
+            });
+            charts.linhas.data.datasets = datasetsFinal;
+            charts.linhas.update();
+
+            // Rankings
+            const listaStats = Object.values(statsIndividuais).filter(a => a.P > 0 || a.F > 0);
+            document.querySelector('#rankingPresenca tbody').innerHTML = [...listaStats].sort((a, b) => b.P - a.P).slice(0, 15).map(a => `<tr><td>${a.nomeOriginal}</td><td class="text-gray-400">${a.turma}</td><td class="text-right font-bold text-emerald-400">${a.P}</td></tr>`).join('');
+            document.querySelector('#rankingFaltas tbody').innerHTML = [...listaStats].sort((a, b) => b.F - a.F).slice(0, 15).map(a => `<tr><td>${a.nomeOriginal}</td><td class="text-gray-400">${a.turma}</td><td class="text-right font-bold text-rose-400">${a.F}</td></tr>`).join('');
+        }
+
+        initCharts();
+        processarDados();
+
+        // ===== PONTUAÇÃO =====
+        const PTS_SISTEMA = { P: 5, A: 2, J: -1, F: -3 };
+        const MESES_PT = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+
+        document.getElementById('mesRefPontos').value = new Date().toISOString().slice(0, 7);
+
+        function processarPontuacao() {
+            const alunos = JSON.parse(localStorage.getItem('tsunami_alunos')) || [];
+            const freq = JSON.parse(localStorage.getItem('tsunami_freq')) || {};
+            // Horário de chegada fica salvo separadamente em tsunami_ordens, com a MESMA chave "NOME|DATA-ISO"
+            const ordens = JSON.parse(localStorage.getItem('tsunami_ordens')) || {};
+
+            const mesRefValue = document.getElementById('mesRefPontos').value;
+            const janela = parseInt(document.getElementById('filtroJanelaPontos').value);
+            if (!mesRefValue) return;
+
+            const [anoRef, mes1] = mesRefValue.split('-').map(Number);
+
+            // Monta lista de {ano, mes 1-12} a incluir
+            const periodos = [];
+            for (let i = 0; i < janela; i++) {
+                let m = mes1 - i, a = anoRef;
+                if (m <= 0) { m += 12; a -= 1; }
+                periodos.push({ ano: a, mes: m });
+            }
+
+            // Coleta todos os sábados únicos do período para contar arenas (Q)
+            const sabadosNoPeriodo = new Set();
+            Object.keys(freq).forEach(chave => {
+                if (chave.endsWith('-txt')) return;
+                const partes = chave.split('|');
+                if (partes.length < 2) return;
+                const dataISO = partes[1];
+                const dataF = new Date(dataISO + 'T00:00:00');
+                if (dataF.getDay() !== 6) return;
+                const mData = dataF.getMonth() + 1, aData = dataF.getFullYear();
+                if (periodos.some(p => p.mes === mData && p.ano === aData)) {
+                    sabadosNoPeriodo.add(dataISO);
+                }
+            });
+            const totalArenas = sabadosNoPeriodo.size;
+
+            // Atualiza badge Q
+            const badgeQ = document.getElementById('badgeArenas');
+            if (badgeQ) badgeQ.textContent = totalArenas;
+
+            // Inicializa stats
+            const statsMap = {};
+            alunos.forEach(a => {
+                const key = a.nome.trim().toUpperCase();
+                statsMap[key] = { nomeOriginal: a.nome, turma: a.turma || 'S/T', P: 0, A: 0, J: 0, F: 0, chegadas: [] };
+            });
+
+            Object.entries(freq).forEach(([chave, status]) => {
+                if (chave.endsWith('-txt')) return;
+                const partes = chave.split('|');
+                if (partes.length < 2) return;
+                const nomeRaw = partes[0].trim().toUpperCase();
+                const dataISO = partes[1];
+                const dataF = new Date(dataISO + 'T00:00:00');
+                if (dataF.getDay() !== 6) return; // so sabados
+                const mData = dataF.getMonth() + 1, aData = dataF.getFullYear();
+                if (!periodos.some(p => p.mes === mData && p.ano === aData)) return;
+
+                if (!statsMap[nomeRaw]) statsMap[nomeRaw] = { nomeOriginal: nomeRaw, turma: 'S/T', P: 0, A: 0, J: 0, F: 0, chegadas: [] };
+                const s = (status || '').toUpperCase();
+                if (s === 'P') {
+                    statsMap[nomeRaw].P++;
+                    // Busca horario de chegada no tsunami_ordens (chave "NOME|DATA-ISO")
+                    const horaChegada = ordens[chave] || ordens[nomeRaw + '|' + dataISO];
+                    if (horaChegada && typeof horaChegada === 'string') {
+                        const match = horaChegada.match(/(\d{1,2}):(\d{2})/);
+                        if (match) {
+                            const h = parseInt(match[1]), min = parseInt(match[2]);
+                            if (!isNaN(h) && !isNaN(min)) {
+                                statsMap[nomeRaw].chegadas.push(h * 60 + min);
+                            }
+                        }
+                    }
+                }
+                else if (s === 'A') {
+                    statsMap[nomeRaw].A++;
+                    // Atraso também tem horário registrado, no tsunami_ordens
+                    const horaChegada = ordens[chave] || ordens[nomeRaw + '|' + dataISO];
+                    if (horaChegada && typeof horaChegada === 'string') {
+                        const match = horaChegada.match(/(\d{1,2}):(\d{2})/);
+                        if (match) {
+                            const h = parseInt(match[1]), min = parseInt(match[2]);
+                            if (!isNaN(h) && !isNaN(min)) {
+                                statsMap[nomeRaw].chegadas.push(h * 60 + min);
+                            }
+                        }
+                    }
+                }
+                else if (s === 'J') statsMap[nomeRaw].J++;
+                else if (s === 'F') statsMap[nomeRaw].F++;
+            });
+
+            // Calcula media de chegada e pontos
+            const lista = Object.values(statsMap)
+                .filter(a => a.P + a.A + a.J + a.F > 0)
+                .map(a => {
+                    const totalChegadas = a.chegadas.length;
+                    const mediaMinutos = totalChegadas > 0 ? Math.round(a.chegadas.reduce((s, v) => s + v, 0) / totalChegadas) : null;
+                    // Q = quantidade de sábados que o aluno teve qualquer registro
+                    const qAluno = a.P + a.A + a.J + a.F;
+                    return {
+                        ...a,
+                        pontos: a.P * PTS_SISTEMA.P + a.A * PTS_SISTEMA.A + a.J * PTS_SISTEMA.J + a.F * PTS_SISTEMA.F,
+                        mediaChegada: mediaMinutos,
+                        totalChegadas: totalChegadas,
+                        qAluno: qAluno
+                    };
+                })
+                .sort((a, b) => {
+                    if (b.pontos !== a.pontos) return b.pontos - a.pontos;   // 1 criterio: pontuacao
+
+                    // 2 criterio: quem chega mais cedo (media de horario, menor = mais cedo) vence o desempate
+                    if (a.mediaChegada !== null && b.mediaChegada !== null && a.mediaChegada !== b.mediaChegada) {
+                        return a.mediaChegada - b.mediaChegada;
+                    }
+                    if (a.mediaChegada !== null && b.mediaChegada === null) return -1; // quem tem chegada registrada vence quem nao tem
+                    if (a.mediaChegada === null && b.mediaChegada !== null) return 1;
+
+                    if (b.P !== a.P) return b.P - a.P;                       // 3 criterio: mais presencas
+                    if (a.A !== b.A) return a.A - b.A;                       // 4 criterio: menos atrasos
+                    if (a.F !== b.F) return a.F - b.F;                       // 5 criterio: menos faltas
+                    return 0;
+                });
+
+            const tbody = document.querySelector('#tabelaPontuacao tbody');
+            const semDados = document.getElementById('semDadosPontos');
+
+            if (lista.length === 0) {
+                tbody.innerHTML = '';
+                semDados.style.display = '';
+                return;
+            }
+            semDados.style.display = 'none';
+
+            const maxPts = Math.max(...lista.map(a => a.pontos), 1);
+            const minPts = Math.min(...lista.map(a => a.pontos), 0);
+            const range = (maxPts - minPts) || 1;
+
+            // Calcula posicao real respeitando empate (mesma posicao para empate total)
+            const medals = { 1: '🥇', 2: '🥈', 3: '🥉' };
+            const posicoes = [];
+            let posAtual = 1;
+            lista.forEach((a, i) => {
+                if (i === 0) {
+                    posicoes.push(posAtual);
+                } else {
+                    const prev = lista[i - 1];
+                    const empate = a.pontos === prev.pontos && a.P === prev.P && a.A === prev.A && a.F === prev.F && a.mediaChegada === prev.mediaChegada;
+                    if (!empate) posAtual = i + 1;
+                    posicoes.push(posAtual);
+                }
+            });
+
+            tbody.innerHTML = lista.map((a, i) => {
+                const pos = posicoes[i];
+                const posLabel = medals[pos] ? medals[pos] : `${pos}º`;
+                const pct = Math.max(0, ((a.pontos - minPts) / range) * 100);
+                const barColor = a.pontos >= 0 ? '#10b981' : '#f43f5e';
+                const scoreClass = a.pontos > 0 ? 'pts-pos' : a.pontos < 0 ? 'pts-neg' : 'pts-zero';
+                const horaFormatada = a.mediaChegada !== null 
+                    ? `${String(Math.floor(a.mediaChegada / 60)).padStart(2, '0')}:${String(a.mediaChegada % 60).padStart(2, '0')}` 
+                    : '—';
+                return `<tr>
+                    <td style="text-align:center;">${posLabel}</td>
+                    <td>${a.nomeOriginal}</td>
+                    <td class="text-gray-400">${a.turma}</td>
+                    <td class="text-center"><span class="pill-status pill-p">${a.P}</span></td>
+                    <td class="text-center"><span class="pill-status pill-a">${a.A}</span></td>
+                    <td class="text-center"><span class="pill-status pill-j">${a.J}</span></td>
+                    <td class="text-center"><span class="pill-status pill-f">${a.F}</span></td>
+                    <td class="text-center" style="color:#a78bfa;font-size:12px;font-family:monospace;">${horaFormatada}</td>
+                    <td class="text-center" style="color:#10b981;font-size:12px;font-weight:bold;">${a.qAluno}<span style="color:rgba(255,255,255,0.3);font-size:10px;">/${totalArenas}</span></td>
+                    <td class="text-right">
+                        <span class="${scoreClass}">${a.pontos > 0 ? '+' : ''}${a.pontos} pts</span>
+                        <span class="bar-wrap"><span class="bar-fill" style="width:${pct}%;background:${barColor};"></span></span>
+                    </td>
+                </tr>`;
+            }).join('');
+        }
+
+        processarPontuacao();
+    </script>
+</body>
+</html>
